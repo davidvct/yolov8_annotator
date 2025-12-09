@@ -10,6 +10,7 @@ from PySide6.QtGui import QAction, QKeySequence
 
 from widgets.image_canvas import ImageCanvas
 from widgets.annotation_list import AnnotationListWidget
+from widgets.image_list import ImageListWidget
 from utils.file_handler import FileHandler
 from utils.yolo_format import (load_annotations, save_annotations, YOLOAnnotation,
                                 get_annotation_path, load_class_names, save_class_names)
@@ -61,9 +62,15 @@ class MainWindow(QMainWindow):
         # Main layout
         main_layout = QHBoxLayout(central_widget)
 
-        # Left side: Image canvas
+        # Left side: Image list
+        self.image_list_widget = ImageListWidget()
+        self.image_list_widget.setMaximumWidth(250)
+        self.image_list_widget.setMinimumWidth(200)
+        main_layout.addWidget(self.image_list_widget, stretch=0)
+
+        # Center: Image canvas
         self.canvas = ImageCanvas()
-        self.canvas.setMinimumWidth(800)
+        self.canvas.setMinimumWidth(600)
         main_layout.addWidget(self.canvas, stretch=3)
 
         # Right side: Annotation controls
@@ -245,6 +252,9 @@ class MainWindow(QMainWindow):
         self.annotation_widget.delete_requested.connect(self.delete_selected_annotation)
         self.annotation_widget.annotation_selected.connect(self.on_list_annotation_selected)
 
+        # Image list widget signals
+        self.image_list_widget.image_selected.connect(self.on_image_list_selected)
+
     def select_images_folder(self):
         """Open dialog to select images folder"""
         folder = QFileDialog.getExistingDirectory(self, "Select Images Folder")
@@ -255,6 +265,7 @@ class MainWindow(QMainWindow):
             # If labels folder is also set, load the first image
             if self.file_handler.labels_dir:
                 self.file_handler.set_directories(folder, self.file_handler.labels_dir)
+                self.update_image_list()
                 self.load_current_image()
                 self.load_class_names_from_file()
 
@@ -268,6 +279,7 @@ class MainWindow(QMainWindow):
             # If images folder is also set, load the first image
             if self.file_handler.images_dir:
                 self.file_handler.set_directories(self.file_handler.images_dir, folder)
+                self.update_image_list()
                 self.load_current_image()
                 self.load_class_names_from_file()
 
@@ -285,6 +297,25 @@ class MainWindow(QMainWindow):
         else:
             # Create default classes.txt
             save_class_names(classes_file, self.class_names)
+
+    def update_image_list(self):
+        """Update the image list widget with current images"""
+        if self.file_handler.has_images():
+            self.image_list_widget.set_images(
+                self.file_handler.images_dir,
+                self.file_handler.image_files
+            )
+
+    def on_image_list_selected(self, index):
+        """Handle image selection from the image list"""
+        # Check for unsaved changes before switching
+        if not self.prompt_save_changes():
+            return
+
+        # Navigate to the selected image
+        if self.file_handler.goto_image(index):
+            self.load_current_image()
+            self.update_image_list_highlight()
 
     def prompt_save_changes(self):
         """Prompt user to save changes. Returns True if should continue, False if cancelled"""
@@ -357,6 +388,9 @@ class MainWindow(QMainWindow):
         self.undo_manager.push_state(self.current_annotations)
         self.undo_manager.mark_saved()  # Mark initial loaded state as saved
         self.update_undo_redo_actions()
+
+        # Update image list highlighting
+        self.update_image_list_highlight()
 
         self.update_status_bar()
 
@@ -490,6 +524,12 @@ class MainWindow(QMainWindow):
         """Update the enabled state of undo/redo actions"""
         self.undo_action.setEnabled(self.undo_manager.can_undo())
         self.redo_action.setEnabled(self.undo_manager.can_redo())
+
+    def update_image_list_highlight(self):
+        """Update the highlighted image in the image list"""
+        if self.file_handler.has_images():
+            current_index = self.file_handler.get_current_index()
+            self.image_list_widget.set_current_image(current_index)
 
     def update_status_bar(self):
         """Update the status bar with current information"""
