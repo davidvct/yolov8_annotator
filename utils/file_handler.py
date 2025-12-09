@@ -39,13 +39,12 @@ class FileHandler:
             self.current_index = 0
             return
 
-        self.image_files = []
-        for file in sorted(os.listdir(self.images_dir)):
-            file_path = os.path.join(self.images_dir, file)
-            if os.path.isfile(file_path):
-                ext = Path(file).suffix.lower()
-                if ext in self.IMAGE_EXTENSIONS:
-                    self.image_files.append(file)
+        # Fast method: just check extension, don't check if it's a file
+        # This is much faster with thousands of files
+        self.image_files = [
+            file for file in sorted(os.listdir(self.images_dir))
+            if Path(file).suffix.lower() in self.IMAGE_EXTENSIONS
+        ]
 
         self.current_index = 0 if self.image_files else 0
 

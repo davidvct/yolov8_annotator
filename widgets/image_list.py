@@ -2,57 +2,15 @@
 Image list widget with optimized performance for large datasets.
 """
 import os
-from functools import lru_cache
 from pathlib import Path
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QListWidget, QListWidgetItem,
                                 QLabel, QLineEdit, QHBoxLayout)
-from PySide6.QtCore import Qt, Signal, QSize, QThread, QObject
-from PySide6.QtGui import QPixmap, QIcon, QPalette
-
-
-class ThumbnailLoader(QObject):
-    """Background thread worker for loading thumbnails"""
-    thumbnail_ready = Signal(int, QPixmap)
-
-    def __init__(self, image_paths, thumbnail_size):
-        super().__init__()
-        self.image_paths = image_paths
-        self.thumbnail_size = thumbnail_size
-        self.cache = {}
-        self.should_stop = False
-
-    def load_thumbnail(self, index):
-        """Load thumbnail for specific index"""
-        if self.should_stop:
-            return
-
-        if index in self.cache:
-            self.thumbnail_ready.emit(index, self.cache[index])
-            return
-
-        if index < len(self.image_paths):
-            image_path = self.image_paths[index]
-            pixmap = QPixmap(image_path)
-            if not pixmap.isNull():
-                thumbnail = pixmap.scaled(
-                    self.thumbnail_size,
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
-                )
-                self.cache[index] = thumbnail
-                self.thumbnail_ready.emit(index, thumbnail)
-
-    def clear_cache(self):
-        """Clear thumbnail cache"""
-        self.cache.clear()
-
-    def stop(self):
-        """Stop the loader"""
-        self.should_stop = True
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QPalette
 
 
 class ImageListWidget(QWidget):
-    """Widget displaying a list of images with thumbnails"""
+    """Widget displaying a list of images (filenames only for fast loading)"""
 
     image_selected = Signal(int)  # Emits the index of the selected image
 
@@ -62,7 +20,6 @@ class ImageListWidget(QWidget):
         self.image_files = []
         self.images_dir = None
         self.current_index = -1
-        self.thumbnail_loader = None
 
         self._setup_ui()
 
@@ -93,14 +50,9 @@ class ImageListWidget(QWidget):
 
         # Image list
         self.list_widget = QListWidget()
-        self.list_widget.setIconSize(QSize(80, 80))
         self.list_widget.setSpacing(2)
-        self.list_widget.setWordWrap(True)
         self.list_widget.itemClicked.connect(self._on_item_clicked)
         self.list_widget.setVerticalScrollMode(QListWidget.ScrollPerPixel)
-
-        # Enable smooth scrolling
-        self.list_widget.verticalScrollBar().valueChanged.connect(self._on_scroll)
 
         layout.addWidget(self.list_widget)
 
@@ -120,65 +72,14 @@ class ImageListWidget(QWidget):
         self.list_widget.clear()
         self.filter_input.clear()
 
-        # Stop existing thumbnail loader
-        if self.thumbnail_loader:
-            self.thumbnail_loader.stop()
-
         # Update count
         self.count_label.setText(f"{len(image_files)} images")
 
-        # Add items without thumbnails first (fast)
+        # Add items with just filenames (instant even with 10000+ images)
         for i, filename in enumerate(image_files):
             item = QListWidgetItem(filename)
             item.setData(Qt.UserRole, i)  # Store original index
             self.list_widget.addItem(item)
-
-        # Initialize thumbnail loader
-        if images_dir and image_files:
-            image_paths = [os.path.join(images_dir, f) for f in image_files]
-            self.thumbnail_loader = ThumbnailLoader(image_paths, QSize(80, 80))
-            self.thumbnail_loader.thumbnail_ready.connect(self._on_thumbnail_ready)
-
-            # Load thumbnails for visible items
-            self._load_visible_thumbnails()
-
-    def _load_visible_thumbnails(self):
-        """Load thumbnails only for currently visible items"""
-        if not self.thumbnail_loader:
-            return
-
-        # Get visible range
-        first_visible = self.list_widget.indexAt(self.list_widget.rect().topLeft()).row()
-        last_visible = self.list_widget.indexAt(self.list_widget.rect().bottomLeft()).row()
-
-        if first_visible < 0:
-            first_visible = 0
-        if last_visible < 0:
-            last_visible = min(20, self.list_widget.count() - 1)  # Load first 20 initially
-
-        # Load thumbnails for visible items + buffer
-        buffer = 10
-        start_idx = max(0, first_visible - buffer)
-        end_idx = min(self.list_widget.count(), last_visible + buffer)
-
-        for i in range(start_idx, end_idx):
-            item = self.list_widget.item(i)
-            if item:
-                original_index = item.data(Qt.UserRole)
-                self.thumbnail_loader.load_thumbnail(original_index)
-
-    def _on_scroll(self):
-        """Handle scroll events to load more thumbnails"""
-        self._load_visible_thumbnails()
-
-    def _on_thumbnail_ready(self, index, pixmap):
-        """Handle thumbnail loaded event"""
-        # Find the list item with this index
-        for i in range(self.list_widget.count()):
-            item = self.list_widget.item(i)
-            if item and item.data(Qt.UserRole) == index:
-                item.setIcon(QIcon(pixmap))
-                break
 
     def _filter_images(self, text):
         """Filter image list based on search text"""
@@ -227,10 +128,6 @@ class ImageListWidget(QWidget):
 
     def clear(self):
         """Clear the image list"""
-        if self.thumbnail_loader:
-            self.thumbnail_loader.stop()
-            self.thumbnail_loader.clear_cache()
-
         self.list_widget.clear()
         self.image_files = []
         self.images_dir = None

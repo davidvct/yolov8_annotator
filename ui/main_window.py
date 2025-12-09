@@ -262,12 +262,17 @@ class MainWindow(QMainWindow):
             self.file_handler.images_dir = folder
             self.images_folder_label.setText(f"Images Folder: {folder}")
 
-            # If labels folder is also set, load the first image
+            # Load image list immediately
             if self.file_handler.labels_dir:
+                # Both folders set - load everything
                 self.file_handler.set_directories(folder, self.file_handler.labels_dir)
                 self.update_image_list()
                 self.load_current_image()
                 self.load_class_names_from_file()
+            else:
+                # Only images folder set - just show the image list
+                self.file_handler.load_image_list()
+                self.update_image_list()
 
     def select_labels_folder(self):
         """Open dialog to select labels folder"""
@@ -279,7 +284,9 @@ class MainWindow(QMainWindow):
             # If images folder is also set, load the first image
             if self.file_handler.images_dir:
                 self.file_handler.set_directories(self.file_handler.images_dir, folder)
-                self.update_image_list()
+                if not self.image_list_widget.image_files:
+                    # Image list not populated yet - do it now
+                    self.update_image_list()
                 self.load_current_image()
                 self.load_class_names_from_file()
 
