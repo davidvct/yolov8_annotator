@@ -260,15 +260,36 @@ class MainWindow(QMainWindow):
             # Create default classes.txt
             save_class_names(classes_file, self.class_names)
 
-    def load_current_image(self):
+    def prompt_save_changes(self):
+        """Prompt user to save changes. Returns True if should continue, False if cancelled"""
+        if not self.has_unsaved_changes:
+            return True
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Save changes?")
+        msg_box.setText("Save changes?")
+        msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
+        msg_box.setDefaultButton(QMessageBox.Yes)
+
+        reply = msg_box.exec()
+
+        if reply == QMessageBox.Yes:
+            self.save_annotations()
+            return True
+        elif reply == QMessageBox.No:
+            return True
+        else:  # Cancel
+            return False
+
+    def load_current_image(self, check_unsaved=False):
         """Load the current image and its annotations"""
         if not self.file_handler.has_images():
             QMessageBox.warning(self, "No Images", "No images found in the selected folder.")
             return
 
-        # Save current annotations before loading new image
-        if self.has_unsaved_changes:
-            self.save_annotations()
+        # Prompt to save current annotations before loading new image
+        if check_unsaved and not self.prompt_save_changes():
+            return
 
         # Load image
         image_path = self.file_handler.get_current_image_path()
@@ -328,8 +349,8 @@ class MainWindow(QMainWindow):
 
     def next_image(self):
         """Navigate to the next image"""
-        if self.has_unsaved_changes:
-            self.save_annotations()
+        if not self.prompt_save_changes():
+            return
 
         if self.file_handler.next_image():
             self.load_current_image()
@@ -338,8 +359,8 @@ class MainWindow(QMainWindow):
 
     def previous_image(self):
         """Navigate to the previous image"""
-        if self.has_unsaved_changes:
-            self.save_annotations()
+        if not self.prompt_save_changes():
+            return
 
         if self.file_handler.previous_image():
             self.load_current_image()
@@ -440,19 +461,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Handle window close event"""
-        if self.has_unsaved_changes:
-            reply = QMessageBox.question(
-                self, "Unsaved Changes",
-                "You have unsaved changes. Do you want to save before closing?",
-                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel
-            )
-
-            if reply == QMessageBox.Save:
-                self.save_annotations()
-                event.accept()
-            elif reply == QMessageBox.Discard:
-                event.accept()
-            else:
-                event.ignore()
+        if not self.prompt_save_changes():
+            event.ignore()
         else:
             event.accept()
