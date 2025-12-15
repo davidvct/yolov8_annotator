@@ -1,9 +1,9 @@
 """
 Video inference tab widget.
 """
-import os # Add os import
+import os
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
-                                QLabel, QSlider, QCheckBox, QFileDialog, QMessageBox)
+                                QLabel, QSlider, QCheckBox, QFileDialog, QMessageBox, QApplication)
 from PySide6.QtCore import Qt
 
 from widgets.video_list import VideoListWidget
@@ -12,8 +12,8 @@ from utils.video_handler import VideoHandler
 from utils.yolo_inference import YOLOInference
 from utils.video_thread import VideoThread
 
-import cv2 # Required for saving exported frames
-from utils.yolo_format import convert_results_to_yolo_strings # Required for converting inference output
+import cv2
+from utils.yolo_format import convert_results_to_yolo_strings
 
 
 class VideoInferenceTab(QWidget):
@@ -26,7 +26,7 @@ class VideoInferenceTab(QWidget):
         self.video_handler = VideoHandler()
         self.inference_engine = YOLOInference()
         self.video_thread = None
-        self.export_output_dir = None # New state for export folder
+        self.export_output_dir = None
 
         self._setup_ui()
         self._setup_connections()
@@ -62,7 +62,13 @@ class VideoInferenceTab(QWidget):
         select_folder_btn = QPushButton("Select Folder")
         select_folder_btn.clicked.connect(self.select_video_folder)
         select_folder_btn.setFocusPolicy(Qt.NoFocus)
+
         right_layout.addWidget(select_folder_btn)
+
+        refresh_folder_btn = QPushButton("Refresh Folder")
+        refresh_folder_btn.clicked.connect(self.refresh_video_folder)
+        refresh_folder_btn.setFocusPolicy(Qt.NoFocus)
+        right_layout.addWidget(refresh_folder_btn)
 
         right_layout.addSpacing(20)
 
@@ -78,7 +84,13 @@ class VideoInferenceTab(QWidget):
         load_model_btn = QPushButton("Load Model (.pt)")
         load_model_btn.clicked.connect(self.load_model)
         load_model_btn.setFocusPolicy(Qt.NoFocus)
+
         right_layout.addWidget(load_model_btn)
+
+        remove_model_btn = QPushButton("Remove Model")
+        remove_model_btn.clicked.connect(self.remove_model)
+        remove_model_btn.setFocusPolicy(Qt.NoFocus)
+        right_layout.addWidget(remove_model_btn)
 
         right_layout.addSpacing(20)
 
@@ -113,10 +125,23 @@ class VideoInferenceTab(QWidget):
         export_label = QLabel("Export Output Folder:")
         right_layout.addWidget(export_label)
 
+        # Export path layout with Label + Copy Button
+        export_path_layout = QHBoxLayout()
+        export_path_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.export_path_label = QLabel("Not selected")
         self.export_path_label.setWordWrap(True)
         self.export_path_label.setStyleSheet("color: gray;")
-        right_layout.addWidget(self.export_path_label)
+        export_path_layout.addWidget(self.export_path_label)
+
+        copy_path_btn = QPushButton("Copy")
+        copy_path_btn.setFixedWidth(50)
+        copy_path_btn.setToolTip("Copy path to clipboard")
+        copy_path_btn.setFocusPolicy(Qt.NoFocus)
+        copy_path_btn.clicked.connect(self.copy_export_path)
+        export_path_layout.addWidget(copy_path_btn)
+
+        right_layout.addLayout(export_path_layout)
 
         select_export_btn = QPushButton("Select Export Folder")
         select_export_btn.clicked.connect(self.select_export_folder)
@@ -127,6 +152,13 @@ class VideoInferenceTab(QWidget):
         self.export_button.setEnabled(False) # Enabled when video is selected
         self.export_button.setFocusPolicy(Qt.NoFocus)
         right_layout.addWidget(self.export_button)
+
+        # Export status label (replaces popup)
+        self.export_status_label = QLabel("")
+        self.export_status_label.setWordWrap(True)
+        self.export_status_label.setStyleSheet("color: green; font-weight: bold;") 
+        self.export_status_label.setAlignment(Qt.AlignCenter)
+        right_layout.addWidget(self.export_status_label)
 
         right_layout.addStretch()
 
@@ -167,6 +199,30 @@ class VideoInferenceTab(QWidget):
             else:
                 QMessageBox.warning(self, "No Videos", "No video files found in the selected folder.")
 
+
+
+    def refresh_video_folder(self):
+        """Reload video list from the current folder"""
+        if not self.video_handler.videos_dir:
+            return
+
+        self.video_handler.load_video_list()
+        
+        # Update video list
+        if self.video_handler.has_videos():
+             self.video_list_widget.set_videos(
+                self.video_handler.videos_dir,
+                self.video_handler.video_files
+            )
+             # Always reset to first video per user request
+             self.on_video_selected(0)
+        else:
+             self.video_list_widget.clear()
+             # Clear player if no videos left
+             self.video_player.reset()
+             if self.video_thread:
+                 self.video_thread.stop()
+
     def load_model(self):
         """Open dialog to load YOLO model"""
         model_path, _ = QFileDialog.getOpenFileName(
@@ -185,6 +241,15 @@ class VideoInferenceTab(QWidget):
             else:
                 QMessageBox.critical(self, "Error", "Failed to load model. Please check the file.")
 
+
+
+    def remove_model(self):
+        """Unload the current model"""
+        self.inference_engine.unload_model()
+        self.model_path_label.setText("Not loaded")
+        self.model_path_label.setStyleSheet("color: gray;")
+        QMessageBox.information(self, "Success", "Model removed.")
+
     def select_export_folder(self):
         """Open dialog to select export output folder"""
         folder = QFileDialog.getExistingDirectory(self, "Select Export Output Folder")
@@ -195,6 +260,54 @@ class VideoInferenceTab(QWidget):
             
             # Re-enable export button if video is also selected
             self.export_button.setEnabled(self.video_handler.has_current_video())
+
+            # Update status counts
+            self._update_export_counts()
+
+    def copy_export_path(self):
+        """Copy the current export folder path to clipboard"""
+        if self.export_output_dir:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(self.export_output_dir)
+            # Optional: Show a brief "Copied" feedback if desired, or relying on tooltips/basic action.
+            # For now, maybe just a quick status update if idle?
+            # self.export_status_label.setText("Path copied!")
+        else:
+            QMessageBox.warning(self, "Copy Failed", "No export folder selected.")
+    
+    def _update_export_counts(self):
+        """
+        Scan export directory for images and labels and update the status label.
+        Format: Total Exported - Frames:<x>, Labels:<y>
+        """
+        if not self.export_output_dir or not os.path.exists(self.export_output_dir):
+            self.export_status_label.setText("")
+            return
+
+        images_dir = os.path.join(self.export_output_dir, "images")
+        labels_dir = os.path.join(self.export_output_dir, "labels")
+
+        image_count = 0
+        if os.path.exists(images_dir):
+            # Simple count of files, maybe filter extensions if really needed, but file-system count is fast
+            # We assume users don't put garbage in export folders usually.
+            try:
+                # Count files that start with known common image extensions or just all files
+                image_count = len([name for name in os.listdir(images_dir) 
+                                 if os.path.isfile(os.path.join(images_dir, name)) and not name.startswith('.')])
+            except Exception:
+                image_count = 0
+
+        label_count = 0
+        if os.path.exists(labels_dir):
+            try:
+                label_count = len([name for name in os.listdir(labels_dir) 
+                                 if os.path.isfile(os.path.join(labels_dir, name)) and name.endswith('.txt')])
+            except Exception:
+                label_count = 0
+
+        self.export_status_label.setText(f"Total Exported - Frames:{image_count}, Labels:{label_count}")
+
             
     def on_export_frame(self):
         """Export current frame and annotation (if inference is enabled)"""
@@ -216,7 +329,6 @@ class VideoInferenceTab(QWidget):
             return
             
         # Request current frame and results from the video thread.
-        # This will rely on a signal defined in VideoThread (Task 5).
         self.video_thread.request_current_frame_data.emit()
 
 
@@ -345,7 +457,6 @@ class VideoInferenceTab(QWidget):
                     QMessageBox.warning(self, "Export Warning", f"Image saved, but failed to save labels: {e}")
                     return
             # If yolo_strings is empty but results is not None, it means no objects were detected.
-            # We explicitly create an empty label file to denote 'no annotations'.
             else:
                  try:
                     # Create empty file
@@ -356,15 +467,13 @@ class VideoInferenceTab(QWidget):
 
         elif self.inference_engine.enabled and results is None:
             # Inference was enabled but no results were obtained (maybe model failed or no detection)
-            # Create empty file to denote 'no annotations'
-            try:
-                open(label_path, 'w').close()
-            except Exception as e:
-                QMessageBox.warning(self, "Export Warning", f"Image saved, but failed to create empty label file: {e}")
-                return
+            # If no detections, we DO NOT create a label file, as per user request.
+            pass
+        else:
+             pass
         
-        # 4. Success message
-        QMessageBox.information(self, "Export Success", f"Frame and Annotation exported to:\n{image_path}")
+        # 4. Update total export counts
+        self._update_export_counts()
 
     def get_session_state(self) -> dict:
         """
@@ -379,7 +488,7 @@ class VideoInferenceTab(QWidget):
             "inference_threshold": self.inference_engine.confidence,
             "inference_enabled": self.inference_engine.enabled,
             "current_video_index": self.video_handler.get_current_index(),
-            "export_output_dir": self.export_output_dir # New session state item
+            "export_output_dir": self.export_output_dir
         }
 
     def restore_session_state(self, data: dict) -> list:
@@ -471,6 +580,9 @@ class VideoInferenceTab(QWidget):
                 # Check if video is loaded to enable button
                 if self.video_handler.has_current_video():
                     self.export_button.setEnabled(True)
+                
+                # Update status counts
+                self._update_export_counts()
             else:
                 warnings.append(f"Export output folder not found: {export_folder}")
         else:

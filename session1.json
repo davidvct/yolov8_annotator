@@ -1,15 +1,16 @@
 {
   "version": "1.0",
   "annotation_tab": {
-    "images_folder": "G:/My Drive/programming_projects/yolov8_annotator/datasets/images",
-    "labels_folder": "G:/My Drive/programming_projects/yolov8_annotator/datasets/labels",
-    "current_image_index": 3
+    "images_folder": "G:/My Drive/programming_projects/yolov8_annotator/export/images",
+    "labels_folder": "G:/My Drive/programming_projects/yolov8_annotator/export/labels",
+    "current_image_index": 0
   },
   "video_tab": {
     "video_folder": "G:/My Drive/programming_projects/yolov8_annotator/videos",
     "model_path": "G:/My Drive/programming_projects/yolov8_annotator/best.pt",
-    "inference_threshold": 0.5,
+    "inference_threshold": 0.71,
     "inference_enabled": true,
-    "current_video_index": 1
+    "current_video_index": 1,
+    "export_output_dir": "G:/My Drive/programming_projects/yolov8_annotator/export"
   }
 }

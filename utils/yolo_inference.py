@@ -33,7 +33,13 @@ class YOLOInference:
             print(f"Error loading model: {e}")
             self.model = None
             self.model_path = None
+            self.model_path = None
             return False
+
+    def unload_model(self):
+        """Unload the current model"""
+        self.model = None
+        self.model_path = None
 
     def predict(self, frame: np.ndarray):
         """
