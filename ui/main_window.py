@@ -4,13 +4,14 @@ Main window for the YOLOv8 Annotator application.
 import os
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                                 QPushButton, QFileDialog, QStatusBar, QToolBar,
-                                QMessageBox, QLabel)
+                                QMessageBox, QLabel, QTabWidget)
 from PySide6.QtCore import Qt, QEvent
 from PySide6.QtGui import QAction, QKeySequence
 
 from widgets.image_canvas import ImageCanvas
 from widgets.annotation_list import AnnotationListWidget
 from widgets.image_list import ImageListWidget
+from widgets.video_inference_tab import VideoInferenceTab
 from utils.file_handler import FileHandler
 from utils.yolo_format import (load_annotations, save_annotations, YOLOAnnotation,
                                 get_annotation_path, load_class_names, save_class_names)
@@ -55,12 +56,27 @@ class MainWindow(QMainWindow):
 
     def _setup_ui(self):
         """Setup the user interface"""
-        # Central widget
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
+        # Create tab widget as central widget
+        self.tab_widget = QTabWidget()
+        self.setCentralWidget(self.tab_widget)
 
-        # Main layout
-        main_layout = QHBoxLayout(central_widget)
+        # Create annotation tab
+        annotation_tab = self._create_annotation_tab()
+        self.tab_widget.addTab(annotation_tab, "Annotation")
+
+        # Create video inference tab
+        self.video_inference_tab = VideoInferenceTab()
+        self.tab_widget.addTab(self.video_inference_tab, "Video Inference")
+
+        # Status bar
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+
+    def _create_annotation_tab(self):
+        """Create the annotation tab content"""
+        # Tab widget
+        tab_widget = QWidget()
+        main_layout = QHBoxLayout(tab_widget)
 
         # Left side: Image list
         self.image_list_widget = ImageListWidget()
@@ -147,9 +163,7 @@ class MainWindow(QMainWindow):
         right_panel.setMaximumWidth(350)
         main_layout.addWidget(right_panel, stretch=1)
 
-        # Status bar
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
+        return tab_widget
 
     def _setup_menu(self):
         """Setup the menu bar"""
