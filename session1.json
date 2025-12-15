@@ -3,7 +3,7 @@
   "annotation_tab": {
     "images_folder": "G:/My Drive/programming_projects/yolov8_annotator/export/images",
     "labels_folder": "G:/My Drive/programming_projects/yolov8_annotator/export/labels",
-    "current_image_index": 0
+    "current_image_index": 2
   },
   "video_tab": {
     "video_folder": "G:/My Drive/programming_projects/yolov8_annotator/videos",

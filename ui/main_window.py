@@ -167,7 +167,7 @@ class MainWindow(QMainWindow):
         self.redo_btn.setFocusPolicy(Qt.NoFocus)
         action_layout.addWidget(self.redo_btn)
 
-        self.add_polygon_btn = QPushButton("Add Polygon")
+        self.add_polygon_btn = QPushButton("Add Polygon (hold Shift key)")
         self.add_polygon_btn.clicked.connect(self.start_adding_polygon)
         self.add_polygon_btn.setEnabled(False)
         self.add_polygon_btn.setFocusPolicy(Qt.NoFocus)
@@ -665,16 +665,33 @@ class MainWindow(QMainWindow):
     def refresh_annotation_resources(self):
         """Refresh resources in the annotation tab (check for new files)"""
         if self.file_handler.images_dir:
+            # Capture current image name before reloading
+            current_image_name = self.file_handler.get_current_image_name()
+            
             # Reload image list from disk
             self.file_handler.load_image_list()
             self.update_image_list()
             
-            # If we were at the end or current index is invalid, adjust
-            if self.file_handler.current_index >= len(self.file_handler.image_files):
-                self.file_handler.current_index = 0
-                if self.file_handler.has_images():
-                    self.load_current_image()
+            # Try to restore the previous image selection
+            image_found = False
+            if current_image_name and self.file_handler.image_files:
+                try:
+                    new_index = self.file_handler.image_files.index(current_image_name)
+                    self.file_handler.goto_image(new_index)
+                    image_found = True
+                except ValueError:
+                    image_found = False
             
+            # If image not found or no previous image, reset to 0 (default behavior of load_image_list)
+            # But we need to ensure the UI reflects this change if we were previously looking at a valid image
+            if not image_found:
+                 self.file_handler.current_index = 0
+                 if self.file_handler.has_images():
+                     self.load_current_image()
+            
+            # Always update highlight
+            self.update_image_list_highlight()
+
             # Refresh classes if labels dir is set
             if self.file_handler.labels_dir:
                 self.load_class_names_from_file()

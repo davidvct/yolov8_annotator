@@ -50,6 +50,7 @@ class VideoListWidget(QWidget):
         self.list_widget.setSpacing(2)
         self.list_widget.itemClicked.connect(self._on_item_clicked)
         self.list_widget.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+        self.list_widget.setStyleSheet("QListWidget::item:selected { background-color: #1e90ff; color: white; }")
 
         layout.addWidget(self.list_widget)
 
