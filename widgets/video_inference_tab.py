@@ -117,6 +117,9 @@ class VideoInferenceTab(QWidget):
         self.video_player.pause_clicked.connect(self.on_pause)
         self.video_player.stop_clicked.connect(self.on_stop)
         self.video_player.seek_requested.connect(self.on_seek)
+        self.video_player.step_forward_clicked.connect(self.on_step_forward)
+        self.video_player.step_backward_clicked.connect(self.on_step_backward)
+        self.video_player.slider_moved.connect(self.on_slider_moved)
 
     def select_video_folder(self):
         """Open dialog to select video folder"""
@@ -199,6 +202,21 @@ class VideoInferenceTab(QWidget):
         """Handle seek request"""
         if self.video_thread:
             self.video_thread.seek(position_ms)
+
+    def on_step_forward(self):
+        """Handle step forward button"""
+        if self.video_thread:
+            self.video_thread.step_forward()
+
+    def on_step_backward(self):
+        """Handle step backward button"""
+        if self.video_thread:
+            self.video_thread.step_backward()
+
+    def on_slider_moved(self, position_ms):
+        """Handle slider being moved (preview frame)"""
+        if self.video_thread:
+            self.video_thread.get_frame_at_position(position_ms)
 
     def _on_confidence_changed(self, value):
         """Handle confidence slider change"""

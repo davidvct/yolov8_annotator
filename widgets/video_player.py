@@ -14,12 +14,16 @@ class VideoPlayerWidget(QWidget):
     pause_clicked = Signal()
     stop_clicked = Signal()
     seek_requested = Signal(int)  # Position in milliseconds
+    step_forward_clicked = Signal()
+    step_backward_clicked = Signal()
+    slider_moved = Signal(int)  # Emitted while dragging slider
 
     def __init__(self):
         super().__init__()
 
         self.is_playing = False
         self.duration_ms = 0
+        self.total_frames = 0
 
         self._setup_ui()
 
@@ -38,6 +42,20 @@ class VideoPlayerWidget(QWidget):
 
         # Controls layout
         controls_layout = QHBoxLayout()
+
+        # Step backward button
+        self.step_backward_button = QPushButton("◀ Step")
+        self.step_backward_button.setEnabled(False)
+        self.step_backward_button.setFocusPolicy(Qt.NoFocus)
+        self.step_backward_button.clicked.connect(self._on_step_backward_clicked)
+        controls_layout.addWidget(self.step_backward_button)
+
+        # Step forward button
+        self.step_forward_button = QPushButton("Step ▶")
+        self.step_forward_button.setEnabled(False)
+        self.step_forward_button.setFocusPolicy(Qt.NoFocus)
+        self.step_forward_button.clicked.connect(self._on_step_forward_clicked)
+        controls_layout.addWidget(self.step_forward_button)
 
         # Play button
         self.play_button = QPushButton("Play")
@@ -60,9 +78,20 @@ class VideoPlayerWidget(QWidget):
         self.stop_button.clicked.connect(self._on_stop_clicked)
         controls_layout.addWidget(self.stop_button)
 
+        # Info labels layout
+        info_layout = QVBoxLayout()
+
         # Time label
         self.time_label = QLabel("00:00 / 00:00")
-        controls_layout.addWidget(self.time_label)
+        self.time_label.setAlignment(Qt.AlignCenter)
+        info_layout.addWidget(self.time_label)
+
+        # Frame label
+        self.frame_label = QLabel("Frame: 0 / 0")
+        self.frame_label.setAlignment(Qt.AlignCenter)
+        info_layout.addWidget(self.frame_label)
+
+        controls_layout.addLayout(info_layout)
 
         layout.addLayout(controls_layout)
 
@@ -79,6 +108,7 @@ class VideoPlayerWidget(QWidget):
         self.timeline_slider.setValue(0)
         self.timeline_slider.sliderPressed.connect(self._on_slider_pressed)
         self.timeline_slider.sliderReleased.connect(self._on_slider_released)
+        self.timeline_slider.sliderMoved.connect(self._on_slider_moved)
         timeline_layout.addWidget(self.timeline_slider)
 
         layout.addLayout(timeline_layout)
@@ -110,9 +140,27 @@ class VideoPlayerWidget(QWidget):
         self.time_label.setText("00:00 / 00:00")
         self.stop_clicked.emit()
 
+    def _on_step_forward_clicked(self):
+        """Handle step forward button click"""
+        self.step_forward_clicked.emit()
+
+    def _on_step_backward_clicked(self):
+        """Handle step backward button click"""
+        self.step_backward_clicked.emit()
+
     def _on_slider_pressed(self):
         """Handle slider press"""
         self.slider_pressed = True
+
+    def _on_slider_moved(self, position_ms):
+        """Handle slider being moved (while dragging)"""
+        # Update time label while dragging
+        current_time = self._format_time(position_ms)
+        total_time = self._format_time(self.duration_ms)
+        self.time_label.setText(f"{current_time} / {total_time}")
+
+        # Emit signal to update video frame preview
+        self.slider_moved.emit(position_ms)
 
     def _on_slider_released(self):
         """Handle slider release"""
@@ -137,12 +185,13 @@ class VideoPlayerWidget(QWidget):
             )
             self.video_label.setPixmap(scaled_pixmap)
 
-    def update_position(self, position_ms: int):
+    def update_position(self, position_ms: int, current_frame: int = 0):
         """
         Update the timeline position
 
         Args:
             position_ms: Current position in milliseconds
+            current_frame: Current frame number
         """
         if not self.slider_pressed:
             self.timeline_slider.setValue(position_ms)
@@ -152,36 +201,48 @@ class VideoPlayerWidget(QWidget):
         total_time = self._format_time(self.duration_ms)
         self.time_label.setText(f"{current_time} / {total_time}")
 
-    def set_duration(self, duration_ms: int):
+        # Update frame label
+        self.frame_label.setText(f"Frame: {current_frame} / {self.total_frames}")
+
+    def set_duration(self, duration_ms: int, total_frames: int = 0):
         """
         Set the video duration
 
         Args:
             duration_ms: Duration in milliseconds
+            total_frames: Total number of frames
         """
         self.duration_ms = duration_ms
+        self.total_frames = total_frames
         self.timeline_slider.setMaximum(duration_ms)
         self.timeline_slider.setEnabled(True)
+        self.frame_label.setText(f"Frame: 0 / {total_frames}")
 
     def enable_controls(self, enabled: bool):
         """Enable or disable playback controls"""
         self.play_button.setEnabled(enabled and not self.is_playing)
         self.pause_button.setEnabled(enabled and self.is_playing)
         self.stop_button.setEnabled(enabled)
+        self.step_forward_button.setEnabled(enabled)
+        self.step_backward_button.setEnabled(enabled)
         self.timeline_slider.setEnabled(enabled)
 
     def reset(self):
         """Reset the player to initial state"""
         self.is_playing = False
         self.duration_ms = 0
+        self.total_frames = 0
         self.video_label.clear()
         self.video_label.setText("No video loaded")
         self.timeline_slider.setValue(0)
         self.timeline_slider.setEnabled(False)
         self.time_label.setText("00:00 / 00:00")
+        self.frame_label.setText("Frame: 0 / 0")
         self.play_button.setEnabled(False)
         self.pause_button.setEnabled(False)
         self.stop_button.setEnabled(False)
+        self.step_forward_button.setEnabled(False)
+        self.step_backward_button.setEnabled(False)
 
     def on_playback_finished(self):
         """Handle playback finished"""
