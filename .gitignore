@@ -24,6 +24,8 @@ wheels/
 *.egg
 videos/
 *.pt
+.env
+export/
 
 # Virtual Environment
 venv/
@@ -37,7 +39,9 @@ ENV/
 *.swp
 *.swo
 *~
+.aider.chat.history.md
 
 # OS
 .DS_Store
 Thumbs.db
+.aider*

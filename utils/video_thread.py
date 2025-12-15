@@ -16,6 +16,11 @@ class VideoThread(QThread):
     duration_changed = Signal(int, int) # Emit total duration (ms) and total frames
     playback_finished = Signal()        # Emit when video ends
     error_occurred = Signal(str)        # Emit error message
+    
+    # Signals for frame export
+    request_current_frame_data = Signal()
+    # frame_data_ready_for_export sends (frame_np, frame_number, video_name, results)
+    frame_data_ready_for_export = Signal(object, int, str, object)
 
     def __init__(self):
         super().__init__()
@@ -29,6 +34,9 @@ class VideoThread(QThread):
         self.cap = None
         self.fps = 0
         self.current_frame_number = 0  # Track current frame manually
+        
+        # Connect internal signal to handler slot running in this thread context
+        self.request_current_frame_data.connect(self._export_frame_data_handler)
 
     def set_video(self, video_path: str):
         """Set the video file to play"""
@@ -38,6 +46,41 @@ class VideoThread(QThread):
     def set_inference_engine(self, engine: YOLOInference):
         """Set the YOLO inference engine"""
         self.inference_engine = engine
+
+    def _export_frame_data_handler(self):
+        """
+        Retrieves current frame data and inference results, and emits them for export.
+        This method is executed in the VideoThread when requested via signal.
+        """
+        if not self.cap or not self.cap.isOpened():
+            self.error_occurred.emit("Cannot export: video stream is not open.")
+            return
+
+        if not self.is_paused:
+            # Should be paused, but defensively check
+            return
+
+        # 1. Read the currently tracked frame
+        # We use _read_frame_at to ensure we read the specific frame number we are currently on.
+        frame = self._read_frame_at(self.current_frame_number)
+
+        if frame is None:
+            self.error_occurred.emit(f"Cannot export: failed to read frame {self.current_frame_number}.")
+            return
+
+        # 2. Run inference if enabled
+        results = None
+        if self.inference_engine and self.inference_engine.is_loaded() and self.inference_engine.enabled:
+            # Predict uses the raw frame (non-annotated)
+            results = self.inference_engine.predict(frame)
+        
+        # 3. Get video name
+        video_name = cv2.os.path.splitext(cv2.os.path.basename(self.video_path))[0]
+        
+        # 4. Emit data
+        # frame_np is the raw frame (BGR, no drawn annotations)
+        self.frame_data_ready_for_export.emit(frame, self.current_frame_number, video_name, results)
+
 
     def run(self):
         """Main thread loop"""
@@ -94,10 +137,13 @@ class VideoThread(QThread):
 
             # Update position
             position_ms = int(self.cap.get(cv2.CAP_PROP_POS_MSEC))
+            
+            # Update frame index directly from the capture device to ensure it matches the frame we just read
+            # CAP_PROP_POS_FRAMES returns the index of the next frame to be captured, 
+            # so the current frame we hold is one less.
+            self.current_frame_number = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
+            
             self.position_changed.emit(position_ms, self.current_frame_number)
-
-            # Increment frame counter
-            self.current_frame_number += 1
 
             # Control playback speed (basic timing)
             if self.fps > 0:

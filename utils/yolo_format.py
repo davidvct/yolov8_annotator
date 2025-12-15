@@ -116,6 +116,45 @@ def get_annotation_path(image_path: str, labels_dir: str) -> str:
     return os.path.join(labels_dir, f'{image_name}.txt')
 
 
+def convert_results_to_yolo_strings(results) -> List[str]:
+    """
+    Convert ultralytics inference results (segmentation masks) to YOLO format strings.
+
+    Note: This requires 'ultralytics' to be installed and assumes a segmentation model.
+    It expects the 'results' object to have a 'masks' attribute.
+
+    Args:
+        results: An ultralytics Results object (e.g., results[0] from model())
+
+    Returns:
+        List of YOLO annotation strings (class_id x1 y1 x2 y2 ...)
+    """
+    yolo_strings = []
+
+    # Check if segmentation masks are present (YOLO segmentation model)
+    if results and hasattr(results, 'masks') and results.masks is not None:
+        try:
+            # normalized_polygons is a list of numpy arrays, each array is shape (N, 2)
+            normalized_polygons = results.masks.xyn
+            # Get class IDs from boxes results (must match the order of masks)
+            class_ids = results.boxes.cls.int().tolist()
+
+            if len(normalized_polygons) != len(class_ids):
+                print("Warning: Mismatch between number of masks and class IDs during conversion.")
+                return []
+
+            for class_id, polygon in zip(class_ids, normalized_polygons):
+                # Ensure the polygon points are flat list of coordinates (x1 y1 x2 y2 ...)
+                coords = ' '.join(f'{x:.6f} {y:.6f}' for x, y in polygon)
+                yolo_strings.append(f'{class_id} {coords}')
+        except Exception as e:
+            # Handle cases where results object structure is unexpected
+            print(f"Error processing ultralytics results for YOLO conversion: {e}")
+            return []
+
+    return yolo_strings
+
+
 def load_class_names(class_file_path: str) -> List[str]:
     """
     Load class names from a classes.txt file.

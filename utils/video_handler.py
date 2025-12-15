@@ -98,6 +98,10 @@ class VideoHandler:
         """Check if there are any videos loaded"""
         return len(self.video_files) > 0
 
+    def has_current_video(self) -> bool:
+        """Check if there is a video currently selected/loaded"""
+        return self.has_videos() and 0 <= self.current_index < len(self.video_files)
+
     def get_progress_string(self) -> str:
         """Get a string representing current progress (e.g., '1/10')"""
         if not self.video_files:
