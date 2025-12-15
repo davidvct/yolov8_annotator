@@ -408,7 +408,8 @@ class VideoInferenceTab(QWidget):
 
     def _on_inference_toggled(self, state):
         """Handle inference checkbox toggle"""
-        enabled = state == Qt.Checked
+        # Fix: state is int (0 or 2), Qt.Checked is enum. Compare values.
+        enabled = (state == Qt.Checked.value)
         self.inference_engine.set_enabled(enabled)
 
     def _on_video_error(self, error_msg):

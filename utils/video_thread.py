@@ -3,7 +3,7 @@ Video processing thread for smooth playback and inference.
 """
 import cv2
 import numpy as np
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Signal, QMutex, QMutexLocker
 from PySide6.QtGui import QImage
 from utils.yolo_inference import YOLOInference
 
@@ -34,6 +34,7 @@ class VideoThread(QThread):
         self.cap = None
         self.fps = 0
         self.current_frame_number = 0  # Track current frame manually
+        self.mutex = QMutex()
         
         # Connect internal signal to handler slot running in this thread context
         self.request_current_frame_data.connect(self._export_frame_data_handler)
@@ -52,17 +53,18 @@ class VideoThread(QThread):
         Retrieves current frame data and inference results, and emits them for export.
         This method is executed in the VideoThread when requested via signal.
         """
-        if not self.cap or not self.cap.isOpened():
-            self.error_occurred.emit("Cannot export: video stream is not open.")
-            return
+        with QMutexLocker(self.mutex):
+            if not self.cap or not self.cap.isOpened():
+                self.error_occurred.emit("Cannot export: video stream is not open.")
+                return
 
-        if not self.is_paused:
-            # Should be paused, but defensively check
-            return
+            if not self.is_paused:
+                # Should be paused, but defensively check
+                return
 
-        # 1. Read the currently tracked frame
-        # We use _read_frame_at to ensure we read the specific frame number we are currently on.
-        frame = self._read_frame_at(self.current_frame_number)
+            # 1. Read the currently tracked frame
+            # We use _read_frame_at to ensure we read the specific frame number we are currently on.
+            frame = self._read_frame_at(self.current_frame_number)
 
         if frame is None:
             self.error_occurred.emit(f"Cannot export: failed to read frame {self.current_frame_number}.")
@@ -108,8 +110,10 @@ class VideoThread(QThread):
         while not self.should_stop:
             # Handle seek
             if self.seek_position >= 0:
-                self.cap.set(cv2.CAP_PROP_POS_MSEC, self.seek_position)
-                self.current_frame_number = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
+                with QMutexLocker(self.mutex):
+                    if self.cap and self.cap.isOpened():
+                         self.cap.set(cv2.CAP_PROP_POS_MSEC, self.seek_position)
+                         self.current_frame_number = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
                 self.seek_position = -1
 
             # Handle pause
@@ -118,8 +122,17 @@ class VideoThread(QThread):
                 continue
 
             # Read frame
-            ret, frame = self.cap.read()
-
+            with QMutexLocker(self.mutex):
+                if not self.cap or not self.cap.isOpened():
+                     break
+                ret, frame = self.cap.read()
+                
+                # Capture position immediately if read was successful
+                if ret:
+                    position_ms = int(self.cap.get(cv2.CAP_PROP_POS_MSEC))
+                    # CAP_PROP_POS_FRAMES returns the index of the next frame to be captured
+                    self.current_frame_number = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
+            
             if not ret:
                 # End of video
                 self.playback_finished.emit()
@@ -135,14 +148,7 @@ class VideoThread(QThread):
             if qt_image:
                 self.frame_ready.emit(qt_image)
 
-            # Update position
-            position_ms = int(self.cap.get(cv2.CAP_PROP_POS_MSEC))
-            
-            # Update frame index directly from the capture device to ensure it matches the frame we just read
-            # CAP_PROP_POS_FRAMES returns the index of the next frame to be captured, 
-            # so the current frame we hold is one less.
-            self.current_frame_number = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
-            
+            # Update position signal using captured values
             self.position_changed.emit(position_ms, self.current_frame_number)
 
             # Control playback speed (basic timing)
@@ -185,74 +191,76 @@ class VideoThread(QThread):
 
     def step_forward(self):
         """Step one frame forward"""
-        if not self.cap or not self.cap.isOpened():
-            return
+        with QMutexLocker(self.mutex):
+            if not self.cap or not self.cap.isOpened():
+                return
 
-        # Pause playback
-        self.is_paused = True
+            # Pause playback
+            self.is_paused = True
 
-        # Calculate next frame number
-        total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        next_frame = self.current_frame_number + 1
+            # Calculate next frame number
+            total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            next_frame = self.current_frame_number + 1
 
-        # Check bounds
-        if next_frame >= total_frames:
-            return
+            # Check bounds
+            if next_frame >= total_frames:
+                return
 
-        # Read next frame without advancing position
-        frame = self._read_frame_at(next_frame)
-        if frame is not None:
-            # Update frame counter
-            self.current_frame_number = next_frame
+            # Read next frame without advancing position
+            frame = self._read_frame_at(next_frame)
+            if frame is not None:
+                # Update frame counter
+                self.current_frame_number = next_frame
 
-            # Run inference if enabled
-            if self.inference_engine and self.inference_engine.is_loaded() and self.inference_engine.enabled:
-                results = self.inference_engine.predict(frame)
-                frame = self.inference_engine.draw_results(frame, results)
+                # Run inference if enabled
+                if self.inference_engine and self.inference_engine.is_loaded() and self.inference_engine.enabled:
+                    results = self.inference_engine.predict(frame)
+                    frame = self.inference_engine.draw_results(frame, results)
 
-            # Convert and emit frame
-            qt_image = self._convert_frame_to_qimage(frame)
-            if qt_image:
-                self.frame_ready.emit(qt_image)
+                # Convert and emit frame
+                qt_image = self._convert_frame_to_qimage(frame)
+                if qt_image:
+                    self.frame_ready.emit(qt_image)
 
-            # Update position
-            position_ms = int(self.cap.get(cv2.CAP_PROP_POS_MSEC))
-            self.position_changed.emit(position_ms, self.current_frame_number)
+                # Update position
+                position_ms = int(self.cap.get(cv2.CAP_PROP_POS_MSEC))
+                self.position_changed.emit(position_ms, self.current_frame_number)
 
     def step_backward(self):
         """Step one frame backward"""
-        if not self.cap or not self.cap.isOpened():
-            return
+        with QMutexLocker(self.mutex):
+            if not self.cap or not self.cap.isOpened():
+                return
 
-        # Pause playback
-        self.is_paused = True
+            # Pause playback
+            self.is_paused = True
 
-        # Can't go back from frame 0
-        if self.current_frame_number <= 0:
-            return
+            # Can't go back from frame 0
+            if self.current_frame_number <= 0:
+                return
 
-        # Calculate previous frame number
-        prev_frame = self.current_frame_number - 1
+            # Calculate previous frame number
+            prev_frame = self.current_frame_number - 1
 
-        # Read previous frame without advancing position
-        frame = self._read_frame_at(prev_frame)
-        if frame is not None:
-            # Update frame counter
-            self.current_frame_number = prev_frame
+            # Read previous frame without advancing position
+            frame = self._read_frame_at(prev_frame)
+            if frame is not None:
+                # Update frame counter
+                self.current_frame_number = prev_frame
 
-            # Run inference if enabled
-            if self.inference_engine and self.inference_engine.is_loaded() and self.inference_engine.enabled:
-                results = self.inference_engine.predict(frame)
-                frame = self.inference_engine.draw_results(frame, results)
+                # Run inference if enabled
+                if self.inference_engine and self.inference_engine.is_loaded() and self.inference_engine.enabled:
+                    results = self.inference_engine.predict(frame)
+                    frame = self.inference_engine.draw_results(frame, results)
 
-            # Convert and emit frame
-            qt_image = self._convert_frame_to_qimage(frame)
-            if qt_image:
-                self.frame_ready.emit(qt_image)
+                # Convert and emit frame
+                qt_image = self._convert_frame_to_qimage(frame)
+                if qt_image:
+                    self.frame_ready.emit(qt_image)
 
-            # Update position
-            position_ms = int(self.cap.get(cv2.CAP_PROP_POS_MSEC))
-            self.position_changed.emit(position_ms, self.current_frame_number)
+                # Update position
+                position_ms = int(self.cap.get(cv2.CAP_PROP_POS_MSEC))
+                self.position_changed.emit(position_ms, self.current_frame_number)
 
     def get_frame_at_position(self, position_ms: int):
         """
@@ -261,41 +269,42 @@ class VideoThread(QThread):
         Args:
             position_ms: Position in milliseconds
         """
-        if not self.cap or not self.cap.isOpened():
-            return
+        with QMutexLocker(self.mutex):
+            if not self.cap or not self.cap.isOpened():
+                return
 
-        # Calculate frame number from time position and FPS for accuracy
-        if self.fps > 0:
-            # Convert milliseconds to seconds, then to frame number
-            frame_number = int((position_ms / 1000.0) * self.fps)
-            # Ensure we don't exceed total frames
-            total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            frame_number = min(frame_number, total_frames - 1)
-        else:
-            # Fallback to time-based seek
-            self.cap.set(cv2.CAP_PROP_POS_MSEC, position_ms)
-            frame_number = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
+            # Calculate frame number from time position and FPS for accuracy
+            if self.fps > 0:
+                # Convert milliseconds to seconds, then to frame number
+                frame_number = int((position_ms / 1000.0) * self.fps)
+                # Ensure we don't exceed total frames
+                total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                frame_number = min(frame_number, total_frames - 1)
+            else:
+                # Fallback to time-based seek
+                self.cap.set(cv2.CAP_PROP_POS_MSEC, position_ms)
+                frame_number = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
 
-        # Read frame without advancing position
-        frame = self._read_frame_at(frame_number)
-        if frame is not None:
-            # Run inference if enabled
-            if self.inference_engine and self.inference_engine.is_loaded() and self.inference_engine.enabled:
-                results = self.inference_engine.predict(frame)
-                frame = self.inference_engine.draw_results(frame, results)
+            # Read frame without advancing position
+            frame = self._read_frame_at(frame_number)
+            if frame is not None:
+                # Run inference if enabled
+                if self.inference_engine and self.inference_engine.is_loaded() and self.inference_engine.enabled:
+                    results = self.inference_engine.predict(frame)
+                    frame = self.inference_engine.draw_results(frame, results)
 
-            # Convert and emit frame
-            qt_image = self._convert_frame_to_qimage(frame)
-            if qt_image:
-                self.frame_ready.emit(qt_image)
+                # Convert and emit frame
+                qt_image = self._convert_frame_to_qimage(frame)
+                if qt_image:
+                    self.frame_ready.emit(qt_image)
 
-            # Update position with frame number
-            position_ms = int(self.cap.get(cv2.CAP_PROP_POS_MSEC))
-            self.position_changed.emit(position_ms, frame_number)
+                # Update position with frame number
+                position_ms = int(self.cap.get(cv2.CAP_PROP_POS_MSEC))
+                self.position_changed.emit(position_ms, frame_number)
 
-            # Update our tracked frame number if paused (for subsequent steps)
-            if self.is_paused:
-                self.current_frame_number = frame_number
+                # Update our tracked frame number if paused (for subsequent steps)
+                if self.is_paused:
+                    self.current_frame_number = frame_number
 
     def _read_frame_at(self, frame_number: int):
         """
