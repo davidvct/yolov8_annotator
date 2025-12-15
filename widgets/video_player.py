@@ -201,8 +201,8 @@ class VideoPlayerWidget(QWidget):
         total_time = self._format_time(self.duration_ms)
         self.time_label.setText(f"{current_time} / {total_time}")
 
-        # Update frame label
-        self.frame_label.setText(f"Frame: {current_frame} / {self.total_frames}")
+        # Update frame label (display as 1-indexed for user)
+        self.frame_label.setText(f"Frame: {current_frame + 1} / {self.total_frames}")
 
     def set_duration(self, duration_ms: int, total_frames: int = 0):
         """
@@ -216,7 +216,7 @@ class VideoPlayerWidget(QWidget):
         self.total_frames = total_frames
         self.timeline_slider.setMaximum(duration_ms)
         self.timeline_slider.setEnabled(True)
-        self.frame_label.setText(f"Frame: 0 / {total_frames}")
+        self.frame_label.setText(f"Frame: 1 / {total_frames}")
 
     def enable_controls(self, enabled: bool):
         """Enable or disable playback controls"""
