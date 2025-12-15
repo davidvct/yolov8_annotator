@@ -61,6 +61,9 @@ class MainWindow(QMainWindow):
         # Auto-load last session if available
         self._auto_load_last_session()
 
+        # Track the last saved/loaded session state to detect changes
+        self.last_saved_session_data = self._collect_session_data()
+
     def _setup_ui(self):
         """Setup the user interface"""
         # Create tab widget as central widget
@@ -74,6 +77,9 @@ class MainWindow(QMainWindow):
         # Create video inference tab
         self.video_inference_tab = VideoInferenceTab()
         self.tab_widget.addTab(self.video_inference_tab, "Video Inference")
+
+        # Connect tab change event
+        self.tab_widget.currentChanged.connect(self.on_tab_changed)
 
         # Status bar
         self.status_bar = QStatusBar()
@@ -370,8 +376,8 @@ class MainWindow(QMainWindow):
             return True
 
         msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Save changes?")
-        msg_box.setText("Save changes?")
+        msg_box.setWindowTitle("Save Annotation Changes?")
+        msg_box.setText("Save Annotation Changes?")
         msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
         msg_box.setDefaultButton(QMessageBox.Yes)
 
@@ -650,6 +656,29 @@ class MainWindow(QMainWindow):
         else:
             super().keyPressEvent(event)
 
+    def on_tab_changed(self, index):
+        """Handle tab change events"""
+        # If switching to Annotation tab (index 0)
+        if index == 0:
+            self.refresh_annotation_resources()
+
+    def refresh_annotation_resources(self):
+        """Refresh resources in the annotation tab (check for new files)"""
+        if self.file_handler.images_dir:
+            # Reload image list from disk
+            self.file_handler.load_image_list()
+            self.update_image_list()
+            
+            # If we were at the end or current index is invalid, adjust
+            if self.file_handler.current_index >= len(self.file_handler.image_files):
+                self.file_handler.current_index = 0
+                if self.file_handler.has_images():
+                    self.load_current_image()
+            
+            # Refresh classes if labels dir is set
+            if self.file_handler.labels_dir:
+                self.load_class_names_from_file()
+
     # Session management methods
 
     def _collect_session_data(self) -> dict:
@@ -745,6 +774,9 @@ class MainWindow(QMainWindow):
         self.annotation_widget.update_annotations_list([])
         self.has_unsaved_changes = False
         self.undo_manager.clear()
+        
+        # Reset last saved session data to defaults
+        self.last_saved_session_data = self._collect_session_data()
 
         # Disable buttons
         self.prev_button.setEnabled(False)
@@ -833,6 +865,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Session Loaded with Warnings", warning_text)
         else:
             self.status_bar.showMessage(f"Session loaded: {os.path.basename(filepath)}", 2000)
+            
+        # Update last saved state
+        self.last_saved_session_data = self._collect_session_data()
 
     def save_session(self):
         """Save current session to file."""
@@ -870,12 +905,57 @@ class MainWindow(QMainWindow):
             # Save as last session
             SessionManager.save_last_session_path(filepath)
             self.status_bar.showMessage(f"Session saved: {os.path.basename(filepath)}", 2000)
+            
+            # Update last saved state
+            self.last_saved_session_data = self._collect_session_data()
         else:
             QMessageBox.critical(self, "Error", "Failed to save session file.")
 
     def closeEvent(self, event):
         """Handle window close event"""
+        # 1. Check for unsaved ANNOTATION changes
         if not self.prompt_save_changes():
             event.ignore()
-        else:
-            event.accept()
+            return
+
+        # 2. Check for unsaved SESSION changes
+        current_session_data = self._collect_session_data()
+        
+        # Compare just the important parts, or the whole dict.
+        # Since _collect_session_data returns dictionaries, simple equality check should work 
+        # as long as the order of items is consistent (standard dicts in recent Python are).
+        # To be safe, we can rely on standard dict equality which checks contents.
+        
+        if current_session_data != self.last_saved_session_data:
+            # Check if session is "empty" (just defaults) and we never saved it.
+            # If so, maybe we don't need to prompt? 
+            # But the user might have set up folders and wants to save.
+            # So always prompt if different from last saved/loaded state.
+            
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Save Session Changes?")
+            msg_box.setText("You have unsaved session changes (folders, settings, etc.). Do you want to save the session?")
+            msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
+            msg_box.setDefaultButton(QMessageBox.Yes)
+            
+            reply = msg_box.exec()
+            
+            if reply == QMessageBox.Yes:
+                self.save_session()
+                # If save was cancelled inside save_session (e.g. file dialog cancel),
+                # we should probably verify if it was saved.
+                # However, save_session logic above doesn't return boolean clearly to here easily 
+                # without refactoring save_session.
+                # Let's check if the state matches now.
+                if self._collect_session_data() == self.last_saved_session_data:
+                    event.accept()
+                else:
+                    # User cancelled save or save failed
+                    event.ignore()
+                    return
+            elif reply == QMessageBox.Cancel:
+                event.ignore()
+                return
+            # If No, just continue to close
+            
+        event.accept()
