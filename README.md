@@ -166,6 +166,25 @@ pip install -r requirements.txt
 - Pillow >= 10.0.0
 - numpy >= 1.24.0
 
+## Building the Executable
+
+To create a standalone executable:
+
+1.  **Activate Environment**
+    ```bash
+    conda activate yolov8_annotator_env
+    pip install pyinstaller
+    ```
+
+2.  **Run Build Script**
+    ```bash
+    python build_app.py
+    ```
+
+3.  **Locate EXE**
+    The app will be built in `dist/YOLOv8Annotator/YOLOv8Annotator.exe`.
+
+
 ## License
 
 This project is open source and available for educational and commercial use.
