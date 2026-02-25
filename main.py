@@ -15,8 +15,8 @@ def main():
     app = QApplication(sys.argv)
 
     # Set application metadata
-    app.setApplicationName("YOLOv8 Annotator Beaver")
-    app.setOrganizationName("YOLOv8")
+    app.setApplicationName("Beaver for YoloV8")
+    app.setOrganizationName("Beaver")
     app.setApplicationVersion(VERSION)
 
     # Create and show main window

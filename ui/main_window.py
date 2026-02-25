@@ -12,6 +12,7 @@ from widgets.image_canvas import ImageCanvas
 from widgets.annotation_list import AnnotationListWidget
 from widgets.image_list import ImageListWidget
 from widgets.video_inference_tab import VideoInferenceTab
+from widgets.extra_tab import ExtraTab
 from utils.file_handler import FileHandler
 from utils.yolo_format import (load_annotations, save_annotations, YOLOAnnotation,
                                 get_annotation_path, load_class_names, save_class_names)
@@ -84,6 +85,10 @@ class MainWindow(QMainWindow):
         # Create video inference tab
         self.video_inference_tab = VideoInferenceTab()
         self.tab_widget.addTab(self.video_inference_tab, "Video Inference")
+
+        # Create extra tab
+        self.extra_tab = ExtraTab()
+        self.tab_widget.addTab(self.extra_tab, "Extra")
 
         # Connect tab change event
         self.tab_widget.currentChanged.connect(self.on_tab_changed)
@@ -776,7 +781,8 @@ class MainWindow(QMainWindow):
                 "current_image_index": self.file_handler.get_current_index(),
                 "annotation_splitter_state": self.annotation_splitter.saveState().toBase64().data().decode()
             },
-            "video_tab": self.video_inference_tab.get_session_state()
+            "video_tab": self.video_inference_tab.get_session_state(),
+            "extra_tab": self.extra_tab.get_session_state()
         }
 
     def _restore_session_data(self, session_data: dict) -> list:
@@ -834,6 +840,10 @@ class MainWindow(QMainWindow):
         video_data = session_data.get("video_tab", {})
         video_warnings = self.video_inference_tab.restore_session_state(video_data)
         warnings.extend(video_warnings)
+
+        # Restore extra tab state
+        extra_data = session_data.get("extra_tab", {})
+        self.extra_tab.restore_session_state(extra_data)
 
         return warnings
 
