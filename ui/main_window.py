@@ -4,7 +4,8 @@ Main window for the YOLOv8 Annotator application.
 import os
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                                 QPushButton, QFileDialog, QStatusBar, QToolBar,
-                                QMessageBox, QLabel, QTabWidget, QSplitter)
+                                QMessageBox, QLabel, QTabWidget, QSplitter,
+                                QSlider, QCheckBox, QGroupBox, QFormLayout)
 from PySide6.QtCore import Qt, QEvent, QByteArray
 from PySide6.QtGui import QAction, QKeySequence
 
@@ -165,6 +166,9 @@ class MainWindow(QMainWindow):
         nav_layout.addWidget(self.next_button)
         right_layout.addLayout(nav_layout)
 
+        # Image Adjustments
+        self._setup_image_adjustments_ui(right_layout)
+
         # Annotation list widget
         self.annotation_widget = AnnotationListWidget()
         right_layout.addWidget(self.annotation_widget)
@@ -229,6 +233,110 @@ class MainWindow(QMainWindow):
         self.annotation_splitter.setStretchFactor(2, 0) # Controls
 
         return tab_widget
+
+    def _setup_image_adjustments_ui(self, parent_layout):
+        """Setup image viewing adjustments UI"""
+        group_box = QGroupBox("Image View Adjustments")
+        layout = QFormLayout()
+
+        # Brightness (0-200, default 100)
+        self.brightness_slider = QSlider(Qt.Horizontal)
+        self.brightness_slider.setRange(0, 200)
+        self.brightness_slider.setValue(100)
+        self.brightness_slider.setFocusPolicy(Qt.NoFocus)
+        self.brightness_label = QLabel("1.00")
+        b_layout = QHBoxLayout()
+        b_layout.addWidget(self.brightness_slider)
+        b_layout.addWidget(self.brightness_label)
+        layout.addRow("Brightness:", b_layout)
+        self.brightness_slider.valueChanged.connect(self._on_adjustment_changed)
+
+        # Contrast (0-300, default 100)
+        self.contrast_slider = QSlider(Qt.Horizontal)
+        self.contrast_slider.setRange(0, 300)
+        self.contrast_slider.setValue(100)
+        self.contrast_slider.setFocusPolicy(Qt.NoFocus)
+        self.contrast_label = QLabel("1.00")
+        c_layout = QHBoxLayout()
+        c_layout.addWidget(self.contrast_slider)
+        c_layout.addWidget(self.contrast_label)
+        layout.addRow("Contrast:", c_layout)
+        self.contrast_slider.valueChanged.connect(self._on_adjustment_changed)
+
+        # Gamma (10-300, default 100)
+        self.gamma_slider = QSlider(Qt.Horizontal)
+        self.gamma_slider.setRange(10, 300)
+        self.gamma_slider.setValue(100)
+        self.gamma_slider.setFocusPolicy(Qt.NoFocus)
+        self.gamma_label = QLabel("1.00")
+        g_layout = QHBoxLayout()
+        g_layout.addWidget(self.gamma_slider)
+        g_layout.addWidget(self.gamma_label)
+        layout.addRow("Gamma:", g_layout)
+        self.gamma_slider.valueChanged.connect(self._on_adjustment_changed)
+
+        # Checkboxes
+        check_layout = QHBoxLayout()
+        self.clahe_checkbox = QCheckBox("CLAHE")
+        self.clahe_checkbox.setFocusPolicy(Qt.NoFocus)
+        self.clahe_checkbox.stateChanged.connect(self._on_adjustment_changed)
+        
+        self.invert_checkbox = QCheckBox("Invert")
+        self.invert_checkbox.setFocusPolicy(Qt.NoFocus)
+        self.invert_checkbox.stateChanged.connect(self._on_adjustment_changed)
+        
+        reset_btn = QPushButton("Reset")
+        reset_btn.setFocusPolicy(Qt.NoFocus)
+        reset_btn.clicked.connect(self._reset_adjustments)
+
+        check_layout.addWidget(self.clahe_checkbox)
+        check_layout.addWidget(self.invert_checkbox)
+        check_layout.addWidget(reset_btn)
+        layout.addRow("", check_layout)
+
+        group_box.setLayout(layout)
+        parent_layout.addWidget(group_box)
+        
+    def _on_adjustment_changed(self, _=None):
+        """Apply adjustments to the canvas"""
+        brightness = self.brightness_slider.value() / 100.0
+        contrast = self.contrast_slider.value() / 100.0
+        gamma = self.gamma_slider.value() / 100.0
+        
+        self.brightness_label.setText(f"{brightness:.2f}")
+        self.contrast_label.setText(f"{contrast:.2f}")
+        self.gamma_label.setText(f"{gamma:.2f}")
+        
+        use_clahe = self.clahe_checkbox.isChecked()
+        invert = self.invert_checkbox.isChecked()
+        
+        self.canvas.set_enhancements(brightness, contrast, gamma, use_clahe, invert)
+
+    def _reset_adjustments(self):
+        """Reset image adjustments back to defaults"""
+        self.brightness_slider.blockSignals(True)
+        self.contrast_slider.blockSignals(True)
+        self.gamma_slider.blockSignals(True)
+        self.clahe_checkbox.blockSignals(True)
+        self.invert_checkbox.blockSignals(True)
+
+        self.brightness_slider.setValue(100)
+        self.contrast_slider.setValue(100)
+        self.gamma_slider.setValue(100)
+        self.clahe_checkbox.setChecked(False)
+        self.invert_checkbox.setChecked(False)
+        
+        self.brightness_label.setText("1.00")
+        self.contrast_label.setText("1.00")
+        self.gamma_label.setText("1.00")
+
+        self.brightness_slider.blockSignals(False)
+        self.contrast_slider.blockSignals(False)
+        self.gamma_slider.blockSignals(False)
+        self.clahe_checkbox.blockSignals(False)
+        self.invert_checkbox.blockSignals(False)
+
+        self.canvas.set_enhancements(1.0, 1.0, 1.0, False, False)
 
     def _setup_menu(self):
         """Setup the menu bar"""
@@ -779,7 +887,14 @@ class MainWindow(QMainWindow):
                 "images_folder": self.file_handler.images_dir,
                 "labels_folder": self.file_handler.labels_dir,
                 "current_image_index": self.file_handler.get_current_index(),
-                "annotation_splitter_state": self.annotation_splitter.saveState().toBase64().data().decode()
+                "annotation_splitter_state": self.annotation_splitter.saveState().toBase64().data().decode(),
+                "image_adjustments": {
+                    "brightness": self.brightness_slider.value(),
+                    "contrast": self.contrast_slider.value(),
+                    "gamma": self.gamma_slider.value(),
+                    "clahe": self.clahe_checkbox.isChecked(),
+                    "invert": self.invert_checkbox.isChecked()
+                }
             },
             "video_tab": self.video_inference_tab.get_session_state(),
             "extra_tab": self.extra_tab.get_session_state()
@@ -835,6 +950,29 @@ class MainWindow(QMainWindow):
         splitter_state = annotation_data.get("annotation_splitter_state")
         if splitter_state:
             self.annotation_splitter.restoreState(QByteArray.fromBase64(bytes(splitter_state, 'utf-8')))
+            
+        # Restore image adjustments
+        adjustments = annotation_data.get("image_adjustments", {})
+        if adjustments:
+            self.brightness_slider.blockSignals(True)
+            self.contrast_slider.blockSignals(True)
+            self.gamma_slider.blockSignals(True)
+            self.clahe_checkbox.blockSignals(True)
+            self.invert_checkbox.blockSignals(True)
+
+            self.brightness_slider.setValue(adjustments.get("brightness", 100))
+            self.contrast_slider.setValue(adjustments.get("contrast", 100))
+            self.gamma_slider.setValue(adjustments.get("gamma", 100))
+            self.clahe_checkbox.setChecked(adjustments.get("clahe", False))
+            self.invert_checkbox.setChecked(adjustments.get("invert", False))
+            
+            self.brightness_slider.blockSignals(False)
+            self.contrast_slider.blockSignals(False)
+            self.gamma_slider.blockSignals(False)
+            self.clahe_checkbox.blockSignals(False)
+            self.invert_checkbox.blockSignals(False)
+            
+            self._on_adjustment_changed()
 
         # Restore video tab state
         video_data = session_data.get("video_tab", {})

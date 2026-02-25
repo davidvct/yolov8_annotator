@@ -6,6 +6,8 @@ from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem
 from PySide6.QtCore import Qt, Signal, QPointF, QRectF
 from PySide6.QtGui import QPixmap, QImage, QPen, QBrush, QColor, QPolygonF, QPainter
 from PIL import Image
+import cv2
+import numpy as np
 from models.annotation import Annotation
 
 
@@ -37,6 +39,14 @@ class ImageCanvas(QGraphicsView):
         self.image_path: str = ""
         self.image_width: int = 0
         self.image_height: int = 0
+        
+        # Image Enhancement State
+        self.original_image_np: Optional[np.ndarray] = None
+        self.brightness = 1.0
+        self.contrast = 1.0
+        self.gamma = 1.0
+        self.use_clahe = False
+        self.invert_colors = False
 
         # Annotations
         self.annotations: List[Annotation] = []
@@ -67,33 +77,86 @@ class ImageCanvas(QGraphicsView):
             # Load image using PIL to handle various formats
             pil_image = Image.open(image_path)
             pil_image = pil_image.convert('RGB')
+            self.original_image_np = np.array(pil_image)
 
-            # Convert PIL image to QPixmap
-            img_data = pil_image.tobytes('raw', 'RGB')
-            # Fix: QImage defaults to 32-bit aligned scanlines. Unaligned widths cause buffer overflows.
-            bytes_per_line = pil_image.width * 3
-            qimage = QImage(img_data, pil_image.width, pil_image.height, bytes_per_line, QImage.Format_RGB888)
-            pixmap = QPixmap.fromImage(qimage)
+            self.image_path = image_path
+            self.image_width = pil_image.width
+            self.image_height = pil_image.height
 
             # Clear scene
             self.scene.clear()
             self.polygon_items.clear()
             self.vertex_items.clear()
 
-            # Add pixmap to scene
-            self.pixmap_item = self.scene.addPixmap(pixmap)
-            self.image_path = image_path
-            self.image_width = pil_image.width
-            self.image_height = pil_image.height
-
-            # Fit image in view
-            self.fitInView(self.pixmap_item, Qt.KeepAspectRatio)
+            # Apply enhancements and display
+            self.apply_enhancements(initial_load=True)
 
             return True
 
         except Exception as e:
             print(f"Error loading image {image_path}: {e}")
             return False
+
+    def set_enhancements(self, brightness=1.0, contrast=1.0, gamma=1.0, use_clahe=False, invert_colors=False):
+        """Update enhancement parameters and re-apply."""
+        self.brightness = brightness
+        self.contrast = contrast
+        self.gamma = gamma
+        self.use_clahe = use_clahe
+        self.invert_colors = invert_colors
+        self.apply_enhancements()
+
+    def apply_enhancements(self, initial_load=False):
+        """Apply enhancements to the original image and update the canvas."""
+        if self.original_image_np is None:
+            return
+
+        img = self.original_image_np.copy()
+
+        # 1. CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        if self.use_clahe:
+            lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+            l_channel, a, b = cv2.split(lab)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            cl = clahe.apply(l_channel)
+            limg = cv2.merge((cl, a, b))
+            img = cv2.cvtColor(limg, cv2.COLOR_LAB2RGB)
+
+        # 2. Gamma Correction
+        if self.gamma != 1.0:
+            inv_gamma = 1.0 / self.gamma
+            table = np.array([((i / 255.0) ** inv_gamma) * 255
+                              for i in np.arange(0, 256)]).astype("uint8")
+            img = cv2.LUT(img, table)
+
+        # 3. Brightness and Contrast
+        # contrast -> alpha [0.1, 3.0]
+        # brightness -> beta [-127.5, 127.5] where 1.0 is 0
+        beta = (self.brightness - 1.0) * 127.5
+        if self.contrast != 1.0 or beta != 0:
+            img = cv2.convertScaleAbs(img, alpha=self.contrast, beta=beta)
+
+        # 4. Invert Colors
+        if self.invert_colors:
+            img = cv2.bitwise_not(img)
+
+        # Convert to QImage
+        height, width, channel = img.shape
+        bytes_per_line = 3 * width
+        
+        # Ensure array is contiguous and has the standard RGB layout required by QImage
+        # Creating a copy ensures the memory is properly aligned for PySide6
+        img = np.ascontiguousarray(img)
+        
+        qimage = QImage(img.data, width, height, bytes_per_line, QImage.Format_RGB888)
+        pixmap = QPixmap.fromImage(qimage)
+
+        if initial_load:
+            self.pixmap_item = self.scene.addPixmap(pixmap)
+            self.fitInView(self.pixmap_item, Qt.KeepAspectRatio)
+        else:
+            if self.pixmap_item:
+                self.pixmap_item.setPixmap(pixmap)
 
     def set_annotations(self, annotations: List[Annotation]) -> None:
         """Set the annotations to display"""
@@ -263,6 +326,15 @@ class ImageCanvas(QGraphicsView):
 
     def mousePressEvent(self, event):
         """Handle mouse press events"""
+        if event.button() == Qt.MiddleButton:
+            self.setDragMode(QGraphicsView.ScrollHandDrag)
+            # Create a fake left click event so ScrollHandDrag works properly
+            from PySide6.QtGui import QMouseEvent
+            fake_event = QMouseEvent(event.type(), event.pos(), event.globalPos(),
+                                     Qt.LeftButton, Qt.LeftButton, event.modifiers())
+            super().mousePressEvent(fake_event)
+            return
+
         if not self.pixmap_item:
             return
 
@@ -351,6 +423,14 @@ class ImageCanvas(QGraphicsView):
 
     def mouseReleaseEvent(self, event):
         """Handle mouse release events"""
+        if event.button() == Qt.MiddleButton:
+            self.setDragMode(QGraphicsView.NoDrag)
+            from PySide6.QtGui import QMouseEvent
+            fake_event = QMouseEvent(event.type(), event.pos(), event.globalPos(),
+                                     Qt.LeftButton, Qt.LeftButton, event.modifiers())
+            super().mouseReleaseEvent(fake_event)
+            return
+
         if event.button() == Qt.LeftButton:
             # Emit modification signal when drag is complete
             if self.dragging_vertex and self.selected_annotation:
@@ -366,6 +446,28 @@ class ImageCanvas(QGraphicsView):
         if self.drawing_mode and event.button() == Qt.LeftButton:
             self.finish_polygon()
         super().mouseDoubleClickEvent(event)
+
+    def wheelEvent(self, event):
+        """Handle mouse wheel events for zooming"""
+        if event.modifiers() & Qt.ControlModifier:
+            # Calculate zoom factor
+            zoom_in_factor = 1.15
+            zoom_out_factor = 1.0 / zoom_in_factor
+
+            # Set anchor to mouse position
+            self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+
+            # Zoom
+            # angleDelta().y() is usually 120 (up/forward) or -120 (down/backward)
+            if event.angleDelta().y() > 0:
+                self.scale(zoom_in_factor, zoom_in_factor)
+            elif event.angleDelta().y() < 0:
+                self.scale(zoom_out_factor, zoom_out_factor)
+            
+            # Prevent event from being processed by scrollbars
+            event.accept()
+        else:
+            super().wheelEvent(event)
 
     def keyPressEvent(self, event):
         """Handle key press events"""
@@ -408,5 +510,6 @@ class ImageCanvas(QGraphicsView):
     def resizeEvent(self, event):
         """Handle resize events"""
         super().resizeEvent(event)
-        if self.pixmap_item:
-            self.fitInView(self.pixmap_item, Qt.KeepAspectRatio)
+        # Prevent forcing fitInView on resize so that zoom level isn't ruined
+        # if self.pixmap_item:
+        #     self.fitInView(self.pixmap_item, Qt.KeepAspectRatio)
