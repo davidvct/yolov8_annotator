@@ -162,6 +162,7 @@ class ExtraTab(QWidget):
         dir_layout = QFormLayout(dir_group)
 
         # Image Directory
+        img_container = QVBoxLayout()
         img_row = QHBoxLayout()
         self.img_dir_input = QLineEdit()
         self.img_dir_input.setPlaceholderText("Select folder containing images (optional)...")
@@ -169,17 +170,36 @@ class ExtraTab(QWidget):
         img_browse_btn.clicked.connect(lambda: self._browse_folder(self.img_dir_input, "Select Image Directory"))
         img_row.addWidget(self.img_dir_input)
         img_row.addWidget(img_browse_btn)
-        dir_layout.addRow("Image Path:", img_row)
+        img_container.addLayout(img_row)
+        
+        img_lbl = QLabel("Supported extensions: .jpg, .jpeg, .png, .bmp, .tiff, .tif, .webp")
+        img_lbl.setStyleSheet("color: gray; font-size: 11px;")
+        img_container.addWidget(img_lbl)
+        
+        dir_layout.addRow("Image Path:", img_container)
 
         # Mask Directory
+        mask_container = QVBoxLayout()
         mask_row = QHBoxLayout()
         self.mask_dir_input = QLineEdit()
         self.mask_dir_input.setPlaceholderText("Select folder containing masks (optional)...")
-        mask_browse_btn = QPushButton("Browse...")
-        mask_browse_btn.clicked.connect(lambda: self._browse_folder(self.mask_dir_input, "Select Mask Directory"))
+        self.mask_dir_input.setEnabled(False)
+        self.mask_browse_btn = QPushButton("Browse...")
+        self.mask_browse_btn.setEnabled(False)
+        self.mask_browse_btn.clicked.connect(lambda: self._browse_folder(self.mask_dir_input, "Select Mask Directory"))
         mask_row.addWidget(self.mask_dir_input)
-        mask_row.addWidget(mask_browse_btn)
-        dir_layout.addRow("Mask Path:", mask_row)
+        mask_row.addWidget(self.mask_browse_btn)
+        mask_container.addLayout(mask_row)
+        
+        mask_lbl = QLabel("Supported extensions: .png")
+        mask_lbl.setStyleSheet("color: gray; font-size: 11px;")
+        mask_container.addWidget(mask_lbl)
+        
+        self.mask_enable_cb = QCheckBox("Mask Path:")
+        self.mask_enable_cb.setChecked(False)
+        self.mask_enable_cb.toggled.connect(self._toggle_mask_input)
+        
+        dir_layout.addRow(self.mask_enable_cb, mask_container)
 
         # Target Directory
         target_row = QHBoxLayout()
@@ -247,6 +267,11 @@ class ExtraTab(QWidget):
         log_layout.addWidget(self.log_browser)
         main_layout.addWidget(log_group)
 
+    def _toggle_mask_input(self, checked):
+        """Enable or disable the mask inputs."""
+        self.mask_dir_input.setEnabled(checked)
+        self.mask_browse_btn.setEnabled(checked)
+
     def _browse_folder(self, line_edit, title):
         """Open a directory selection dialog and update the line edit."""
         folder = QFileDialog.getExistingDirectory(self, title)
@@ -260,7 +285,7 @@ class ExtraTab(QWidget):
     def _run_filter(self):
         """Validate inputs and start the worker thread."""
         img_dir = self.img_dir_input.text().strip()
-        mask_dir = self.mask_dir_input.text().strip()
+        mask_dir = self.mask_dir_input.text().strip() if self.mask_enable_cb.isChecked() else ""
         target_dir = self.target_dir_input.text().strip()
         filter_word = self.filter_word_input.text().strip()
         is_move = self.move_radio.isChecked()
@@ -316,6 +341,7 @@ class ExtraTab(QWidget):
         return {
             "img_dir": self.img_dir_input.text(),
             "mask_dir": self.mask_dir_input.text(),
+            "mask_enabled": self.mask_enable_cb.isChecked(),
             "target_dir": self.target_dir_input.text(),
             "filter_word": self.filter_word_input.text(),
             "case_sensitive": self.case_sensitive_cb.isChecked(),
@@ -330,6 +356,7 @@ class ExtraTab(QWidget):
             
         self.img_dir_input.setText(state.get("img_dir", ""))
         self.mask_dir_input.setText(state.get("mask_dir", ""))
+        self.mask_enable_cb.setChecked(state.get("mask_enabled", False))
         self.target_dir_input.setText(state.get("target_dir", ""))
         self.filter_word_input.setText(state.get("filter_word", ""))
         self.case_sensitive_cb.setChecked(state.get("case_sensitive", False))
