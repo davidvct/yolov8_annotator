@@ -3,8 +3,10 @@ import shutil
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, 
                                QLabel, QLineEdit, QPushButton, QFileDialog,
                                QRadioButton, QButtonGroup, QTextBrowser, 
-                               QGroupBox, QFormLayout, QCheckBox, QMessageBox)
+                               QGroupBox, QFormLayout, QCheckBox, QMessageBox,
+                               QComboBox)
 from PySide6.QtCore import Qt, QThread, Signal
+from PIL import Image
 
 class FilterWorker(QThread):
     """Worker thread for filtering and copying/moving files to avoid UI freezing."""
@@ -12,7 +14,7 @@ class FilterWorker(QThread):
     progress_update = Signal(int, int) # current, total
     finished = Signal(bool, str) # success, message
 
-    def __init__(self, img_dir, mask_dir, target_dir, filter_word, is_move, case_sensitive, match_exact):
+    def __init__(self, img_dir, mask_dir, target_dir, filter_word, is_move, case_sensitive, match_exact, target_ext):
         super().__init__()
         self.img_dir = img_dir
         self.mask_dir = mask_dir
@@ -21,6 +23,7 @@ class FilterWorker(QThread):
         self.is_move = is_move
         self.case_sensitive = case_sensitive
         self.match_exact = match_exact
+        self.target_ext = target_ext
 
     def run(self):
         try:
@@ -93,20 +96,50 @@ class FilterWorker(QThread):
                 img_path = os.path.join(self.img_dir, img_filename) if self.img_dir and img_filename else None
                 mask_path = os.path.join(self.mask_dir, mask_filename) if self.mask_dir and mask_filename else None
                 
-                target_img_path = os.path.join(self.target_dir, img_filename) if img_filename else None
                 target_mask_path = os.path.join(self.target_dir, mask_filename) if mask_filename else None
 
                 # Track if at least one file for the base_name was successful
                 item_success = False
 
                 # Process Image
-                if img_path and target_img_path and img_filename:
+                if img_path and img_filename:
+                    # Determine source and target extensions for the image
+                    _, current_ext_with_dot = os.path.splitext(img_filename)
+                    current_ext = current_ext_with_dot.lower().strip('.')
+                    
+                    if self.target_ext == "same as source":
+                        actual_target_ext = current_ext
+                        target_img_filename = img_filename
+                    else:
+                        actual_target_ext = self.target_ext
+                        target_img_filename = f"{base_name}.{actual_target_ext}"
+
+                    target_img_path = os.path.join(self.target_dir, target_img_filename)
+
                     if os.path.exists(img_path):
                         try:
-                            if self.is_move:
-                                shutil.move(img_path, target_img_path)
+                            if actual_target_ext == current_ext:
+                                # No conversion needed
+                                if self.is_move:
+                                    shutil.move(img_path, target_img_path)
+                                else:
+                                    shutil.copy2(img_path, target_img_path)
                             else:
-                                shutil.copy2(img_path, target_img_path)
+                                # Conversion needed
+                                with Image.open(img_path) as img:
+                                    if actual_target_ext == 'jpg':
+                                        if img.mode != 'RGB':
+                                            img = img.convert('RGB')
+                                        img.save(target_img_path, "JPEG", quality=90)
+                                    elif actual_target_ext == 'png':
+                                        img.save(target_img_path, "PNG")
+                                    else:
+                                        # Fallback
+                                        img.save(target_img_path)
+                                
+                                if self.is_move:
+                                    os.remove(img_path)
+
                             item_success = True
                         except Exception as e:
                             self.log_msg.emit(f"Error processing image {img_filename}: {str(e)}")
@@ -240,6 +273,13 @@ class ExtraTab(QWidget):
         op_layout.addWidget(self.move_radio)
         
         op_layout.addSpacing(20)
+        
+        op_layout.addWidget(QLabel("Ext:"))
+        self.ext_combo = QComboBox()
+        self.ext_combo.addItems(["same as source", "jpg", "png"])
+        op_layout.addWidget(self.ext_combo)
+        
+        op_layout.addSpacing(20)
         self.case_sensitive_cb = QCheckBox("Case Sensitive")
         self.match_exact_cb = QCheckBox("Match Exact")
         op_layout.addWidget(self.case_sensitive_cb)
@@ -291,6 +331,7 @@ class ExtraTab(QWidget):
         is_move = self.move_radio.isChecked()
         case_sensitive = self.case_sensitive_cb.isChecked()
         match_exact = self.match_exact_cb.isChecked()
+        target_ext = self.ext_combo.currentText()
 
         if not filter_word:
              QMessageBox.warning(self, "Validation Error", "Please enter a filter word.")
@@ -317,7 +358,7 @@ class ExtraTab(QWidget):
             self._log("Exact match enabled.")
 
         # Start worker thread
-        self.worker = FilterWorker(img_dir, mask_dir, target_dir, filter_word, is_move, case_sensitive, match_exact)
+        self.worker = FilterWorker(img_dir, mask_dir, target_dir, filter_word, is_move, case_sensitive, match_exact, target_ext)
         self.worker.log_msg.connect(self._log)
         self.worker.progress_update.connect(self._on_progress)
         self.worker.finished.connect(self._on_worker_finished)
@@ -346,7 +387,8 @@ class ExtraTab(QWidget):
             "filter_word": self.filter_word_input.text(),
             "case_sensitive": self.case_sensitive_cb.isChecked(),
             "match_exact": self.match_exact_cb.isChecked(),
-            "is_move": self.move_radio.isChecked()
+            "is_move": self.move_radio.isChecked(),
+            "target_ext": self.ext_combo.currentText()
         }
 
     def restore_session_state(self, state):
@@ -361,6 +403,7 @@ class ExtraTab(QWidget):
         self.filter_word_input.setText(state.get("filter_word", ""))
         self.case_sensitive_cb.setChecked(state.get("case_sensitive", False))
         self.match_exact_cb.setChecked(state.get("match_exact", False))
+        self.ext_combo.setCurrentText(state.get("target_ext", "same as source"))
         
         if state.get("is_move", False):
             self.move_radio.setChecked(True)
