@@ -273,18 +273,25 @@ class VideoInferenceTab(QWidget):
                  self.video_thread.stop()
 
     def load_model(self, slot_index=0):
-        """Open dialog to load YOLO model"""
-        model_path, _ = QFileDialog.getOpenFileName(
-            self,
-            f"Select YOLO Model for Slot {slot_index + 1}",
-            "",
-            "YOLO Models (*.pt *.onnx)"
-        )
+        """Load model for the given slot. Open dialog if no path is set or it's already loaded."""
+        label = self.model1_path_label if slot_index == 0 else self.model2_path_label
+        current_path = label.text()
+
+        model_path = ""
+        # If there's a saved path and model isn't loaded yet, launch it directly
+        if current_path and current_path != "Not loaded" and os.path.exists(current_path) and not self.inference_engine.is_loaded(slot_index):
+            model_path = current_path
+        else:
+            model_path, _ = QFileDialog.getOpenFileName(
+                self,
+                f"Select YOLO Model for Slot {slot_index + 1}",
+                "",
+                "YOLO Models (*.pt *.onnx)"
+            )
 
         if model_path:
             success = self.inference_engine.load_model(model_path, slot_index)
             if success:
-                label = self.model1_path_label if slot_index == 0 else self.model2_path_label
                 label.setText(model_path)
                 label.setStyleSheet("color: black;")
                 QMessageBox.information(self, "Success", f"Model loaded successfully into Slot {slot_index + 1}!")
@@ -602,13 +609,11 @@ class VideoInferenceTab(QWidget):
                 for slot_str, path in model_paths.items():
                     slot = int(slot_str)
                     if path and os.path.exists(path):
-                        success = self.inference_engine.load_model(path, slot)
-                        if success:
-                            label = self.model1_path_label if slot == 0 else self.model2_path_label
-                            label.setText(path)
-                            label.setStyleSheet("color: black;")
-                        else:
-                             warnings.append(f"Failed to load model (Slot {slot+1}): {path}")
+                        # Store path but do not auto-load the model
+                        self.inference_engine.item_paths[slot] = path
+                        label = self.model1_path_label if slot == 0 else self.model2_path_label
+                        label.setText(path)
+                        label.setStyleSheet("color: black;")
                     elif path:
                         warnings.append(f"Model file not found (Slot {slot+1}): {path}")
         
