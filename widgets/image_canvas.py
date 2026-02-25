@@ -2,9 +2,9 @@
 Image canvas widget for displaying and annotating images.
 """
 from typing import List, Optional, Tuple
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsPolygonItem, QGraphicsEllipseItem
+from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsPolygonItem, QGraphicsEllipseItem, QGraphicsPathItem
 from PySide6.QtCore import Qt, Signal, QPointF, QRectF
-from PySide6.QtGui import QPixmap, QImage, QPen, QBrush, QColor, QPolygonF, QPainter
+from PySide6.QtGui import QPixmap, QImage, QPen, QBrush, QColor, QPolygonF, QPainter, QPainterPath
 from PIL import Image
 import cv2
 import numpy as np
@@ -67,9 +67,9 @@ class ImageCanvas(QGraphicsView):
 
         # Graphics items for visualization
         self.polygon_items: List[QGraphicsPolygonItem] = []
-        self.vertex_items: List[List[QGraphicsEllipseItem]] = []
+        self.vertex_items: List[List[QGraphicsPathItem]] = []
         self.temp_polygon_item: Optional[QGraphicsPolygonItem] = None
-        self.temp_vertex_items: List[QGraphicsEllipseItem] = []
+        self.temp_vertex_items: List[QGraphicsPathItem] = []
 
     def load_image(self, image_path: str) -> bool:
         """Load an image from file path"""
@@ -206,18 +206,16 @@ class ImageCanvas(QGraphicsView):
         polygon_item.setZValue(1)  # Above image
         self.polygon_items.append(polygon_item)
 
-        # Draw vertices if selected
+        # Draw crosshair vertices
         vertex_list = []
         if annotation.selected:
-            for point in pixel_points:
-                # Triple size: 8x8 -> 24x24
-                vertex_item = self.scene.addEllipse(
-                    point.x() - 12, point.y() - 12, 24, 24,
-                    QPen(Qt.yellow, 2),
-                    QBrush(Qt.white)
-                )
-                vertex_item.setZValue(2)  # Above polygon
-                vertex_list.append(vertex_item)
+            pen = QPen(Qt.yellow, 1)
+        else:
+            pen = QPen(QColor(annotation.color.red(), annotation.color.green(), annotation.color.blue()), 1)
+
+        for point in pixel_points:
+            vertex_item = self._create_crosshair_item(point.x(), point.y(), 12, pen)
+            vertex_list.append(vertex_item)
 
         self.vertex_items.append(vertex_list)
 
@@ -288,16 +286,27 @@ class ImageCanvas(QGraphicsView):
             )
             self.temp_polygon_item.setZValue(1)
 
-        # Draw vertices for ALL points (including the first one)
+        # Draw crosshair vertices for ALL points (including the first one)
+        pen = QPen(Qt.green, 1)
         for x, y in self.current_polygon:
-            # Triple size: 8x8 -> 24x24
-            vertex_item = self.scene.addEllipse(
-                x - 12, y - 12, 24, 24,
-                QPen(Qt.green, 2),
-                QBrush(Qt.white)
-            )
-            vertex_item.setZValue(2)
+            vertex_item = self._create_crosshair_item(x, y, 12, pen)
             self.temp_vertex_items.append(vertex_item)
+
+    def _create_crosshair_item(self, x: float, y: float, radius: int, pen: QPen) -> QGraphicsPathItem:
+        """Create a crosshair graphics item (transparent circle + cross lines)"""
+        path = QPainterPath()
+        # Circle
+        path.addEllipse(QPointF(x, y), radius, radius)
+        # Horizontal line
+        path.moveTo(x - radius, y)
+        path.lineTo(x + radius, y)
+        # Vertical line
+        path.moveTo(x, y - radius)
+        path.lineTo(x, y + radius)
+
+        item = self.scene.addPath(path, pen, QBrush(Qt.transparent))
+        item.setZValue(2)  # Above polygon
+        return item
 
     def set_current_class(self, class_id: int, class_name: str) -> None:
         """Set the current class for new annotations"""
