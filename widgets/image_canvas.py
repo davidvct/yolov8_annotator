@@ -70,7 +70,9 @@ class ImageCanvas(QGraphicsView):
 
             # Convert PIL image to QPixmap
             img_data = pil_image.tobytes('raw', 'RGB')
-            qimage = QImage(img_data, pil_image.width, pil_image.height, QImage.Format_RGB888)
+            # Fix: QImage defaults to 32-bit aligned scanlines. Unaligned widths cause buffer overflows.
+            bytes_per_line = pil_image.width * 3
+            qimage = QImage(img_data, pil_image.width, pil_image.height, bytes_per_line, QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(qimage)
 
             # Clear scene
