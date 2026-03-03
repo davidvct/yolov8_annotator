@@ -15,7 +15,7 @@ def build():
 
     PyInstaller.__main__.run([
         'main.py',
-        '--name=YOLOv8Annotator',
+        '--name=Beaver_yolov8',
         '--onedir',
         '--windowed',
         '--clean',
