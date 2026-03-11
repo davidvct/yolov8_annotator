@@ -1,15 +1,15 @@
 from ultralytics import YOLO
 import os
 
-model_path = r"l:\DataScience_L\David\beaver\data_for_test\model\best.pt"
-output_name = "best_fixed.onnx"
+model_path = r"L:\DataScience_L\ShuenWei\temp\qe-py-yolov8-drone-module-detection-main\runs\segment\train10\weights\best.pt"
+output_name = "L:\DataScience_L\ShuenWei\temp\qe-py-yolov8-drone-module-detection-main\runs\segment\train10\weights\best_custom_export.onnx"
 
 # --- Configuration ---
 # Precision Options: 'fp32', 'fp16', 'int8'
 # - 'fp32': Standard 32-bit floating point (Default)
 # - 'fp16': Half-precision 16-bit floating point (Smaller, can be faster on GPU)
 # - 'int8': 8-bit Integer Quantization (Smallest, fastest on CPU, requires dataset for calibration)
-EXPORT_PRECISION = 'fp16' 
+EXPORT_PRECISION = 'fp32' 
 
 # Other Options
 SIMPLIFY = True  # Use onnx-simplifier to clean up the graph (Recommended)

@@ -32,6 +32,15 @@ class SessionManager:
                 "inference_threshold": 0.5,
                 "inference_enabled": True,
                 "current_video_index": 0
+            },
+            "find_retraining_dataset_tab": {
+                "src_imgs_dir": "",
+                "src_lbls_dir": "",
+                "out_dir": "",
+                "model_path": "",
+                "iou_threshold": 0.50,
+                "min_instances": 0,
+                "max_instances": 1
             }
         }
 
@@ -67,6 +76,11 @@ class SessionManager:
             
         # Check for model keys (support both legacy and new)
         if "model_paths" not in video_tab and "model_path" not in video_tab:
+             return False
+
+        # Optional check for find_retraining_dataset_tab to maintain backwards compatibility
+        # If it's missing entirely from older sessions, that's fine, but if it's there it should be dict
+        if "find_retraining_dataset_tab" in data and not isinstance(data["find_retraining_dataset_tab"], dict):
              return False
 
         return True

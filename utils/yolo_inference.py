@@ -224,6 +224,9 @@ class YOLOSeg:
         self.boxes = None
         self.img_height = 0
         self.img_width = 0
+        self.pad_w = 0.0
+        self.pad_h = 0.0
+        self.scale_ratio = 1.0
 
         # Initialize model
         self.initialize_model(path)
@@ -257,8 +260,23 @@ class YOLOSeg:
 
         input_img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        # Resize input image - ensure dimensions are integers
-        input_img = cv2.resize(input_img, (int(self.input_width), int(self.input_height)))
+        # Letterboxing to maintain aspect ratio
+        self.scale_ratio = min(self.input_width / self.img_width, self.input_height / self.img_height)
+        new_unpad_w = int(round(self.img_width * self.scale_ratio))
+        new_unpad_h = int(round(self.img_height * self.scale_ratio))
+        
+        self.pad_w = (self.input_width - new_unpad_w) / 2.0
+        self.pad_h = (self.input_height - new_unpad_h) / 2.0
+
+        if (self.img_width, self.img_height) != (new_unpad_w, new_unpad_h):
+            input_img = cv2.resize(input_img, (new_unpad_w, new_unpad_h), interpolation=cv2.INTER_LINEAR)
+            
+        top = int(round(self.pad_h - 0.1))
+        bottom = int(round(self.pad_h + 0.1))
+        left = int(round(self.pad_w - 0.1))
+        right = int(round(self.pad_w + 0.1))
+        
+        input_img = cv2.copyMakeBorder(input_img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
 
         # Scale input pixel values to 0 to 1
         input_img = input_img / 255.0
@@ -310,29 +328,48 @@ class YOLOSeg:
         masks = sigmoid(mask_predictions @ mask_output.reshape((num_mask, -1)))
         masks = masks.reshape((-1, mask_height, mask_width))
 
-        # Downscale the boxes to match the mask size
-        scale_boxes = self.rescale_boxes(self.boxes,
-                                   (self.img_height, self.img_width),
-                                   (mask_height, mask_width))
+        # Mapping ratio from 640x640 padded input block down to 160x160 mask chunk
+        fw = mask_width / self.input_width
+        fh = mask_height / self.input_height
 
         # For every box/mask pair, get the mask map
-        mask_maps = np.zeros((len(scale_boxes), self.img_height, self.img_width))
-        blur_size = (int(self.img_width / mask_width), int(self.img_height / mask_height))
-        for i in range(len(scale_boxes)):
+        mask_maps = np.zeros((len(self.boxes), self.img_height, self.img_width), dtype=np.uint8)
+        blur_size = (max(1, int(self.img_width / mask_width)), max(1, int(self.img_height / mask_height)))
+        for i in range(len(self.boxes)):
 
-            scale_x1 = int(math.floor(scale_boxes[i][0]))
-            scale_y1 = int(math.floor(scale_boxes[i][1]))
-            scale_x2 = int(math.ceil(scale_boxes[i][2]))
-            scale_y2 = int(math.ceil(scale_boxes[i][3]))
+            # Original unpadded image box boundaries
+            orig_x1 = self.boxes[i][0]
+            orig_y1 = self.boxes[i][1]
+            orig_x2 = self.boxes[i][2]
+            orig_y2 = self.boxes[i][3]
 
-            x1 = int(math.floor(self.boxes[i][0]))
-            y1 = int(math.floor(self.boxes[i][1]))
-            x2 = int(math.ceil(self.boxes[i][2]))
-            y2 = int(math.ceil(self.boxes[i][3]))
+            # Convert unpadded orig box coords -> 640x640 padded letterbox space coords
+            pad_x1 = orig_x1 * self.scale_ratio + self.pad_w
+            pad_y1 = orig_y1 * self.scale_ratio + self.pad_h
+            pad_x2 = orig_x2 * self.scale_ratio + self.pad_w
+            pad_y2 = orig_y2 * self.scale_ratio + self.pad_h
+
+            # Map from 640x640 letterbox space -> 160x160 mask space
+            scale_x1 = int(max(0, math.floor(pad_x1 * fw)))
+            scale_y1 = int(max(0, math.floor(pad_y1 * fh)))
+            scale_x2 = int(min(mask_width, math.ceil(pad_x2 * fw)))
+            scale_y2 = int(min(mask_height, math.ceil(pad_y2 * fh)))
+
+            # Original image pixel targets (ints for slice bounds)
+            x1 = int(math.floor(orig_x1))
+            y1 = int(math.floor(orig_y1))
+            x2 = int(math.ceil(orig_x2))
+            y2 = int(math.ceil(orig_y2))
+
+            box_w = x2 - x1
+            box_h = y2 - y1
+
+            if box_w <= 0 or box_h <= 0 or scale_x2 <= scale_x1 or scale_y2 <= scale_y1:
+                continue
 
             scale_crop_mask = masks[i][scale_y1:scale_y2, scale_x1:scale_x2]
             crop_mask = cv2.resize(scale_crop_mask,
-                              (x2 - x1, y2 - y1),
+                              (box_w, box_h),
                               interpolation=cv2.INTER_CUBIC)
 
             crop_mask = cv2.blur(crop_mask, blur_size)
@@ -343,18 +380,20 @@ class YOLOSeg:
         return mask_maps
 
     def extract_boxes(self, box_predictions:np.ndarray)->np.ndarray:
-        # Extract boxes from predictions
+        # Extract boxes from predictions (format is [cx, cy, w, h] in 640x640 letterbox coordinates)
         boxes = box_predictions[:, :4]
 
-        # Scale boxes to original image dimensions
-        boxes = self.rescale_boxes(boxes,
-                                   (self.input_height, self.input_width),
-                                   (self.img_height, self.img_width))
-
-        # Convert boxes to xyxy format
+        # Convert boxes to xyxy format (still in 640x640 space)
         boxes = xywh2xyxy(boxes)
 
-        # Check the boxes are within the image
+        # Un-pad and rescale back to original unpadded image coordinates
+        boxes[:, 0] -= self.pad_w
+        boxes[:, 1] -= self.pad_h
+        boxes[:, 2] -= self.pad_w
+        boxes[:, 3] -= self.pad_h
+        boxes[:, :4] /= self.scale_ratio
+
+        # Check the boxes are within the bounds of the original image
         boxes[:, 0] = np.clip(boxes[:, 0], 0, self.img_width)
         boxes[:, 1] = np.clip(boxes[:, 1], 0, self.img_height)
         boxes[:, 2] = np.clip(boxes[:, 2], 0, self.img_width)

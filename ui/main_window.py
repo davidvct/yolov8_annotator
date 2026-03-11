@@ -14,6 +14,7 @@ from widgets.annotation_list import AnnotationListWidget
 from widgets.image_list import ImageListWidget
 from widgets.video_inference_tab import VideoInferenceTab
 from widgets.extra_tab import ExtraTab
+from widgets.find_retraining_dataset_tab import FindRetrainingDatasetTab
 from utils.file_handler import FileHandler
 from utils.yolo_format import (load_annotations, save_annotations, YOLOAnnotation,
                                 get_annotation_path, load_class_names, save_class_names)
@@ -90,6 +91,10 @@ class MainWindow(QMainWindow):
         # Create extra tab
         self.extra_tab = ExtraTab()
         self.tab_widget.addTab(self.extra_tab, "Extra")
+
+        # Create find retraining dataset tab
+        self.find_retraining_dataset_tab = FindRetrainingDatasetTab()
+        self.tab_widget.addTab(self.find_retraining_dataset_tab, "Find Retraining Dataset")
 
         # Connect tab change event
         self.tab_widget.currentChanged.connect(self.on_tab_changed)
@@ -897,7 +902,8 @@ class MainWindow(QMainWindow):
                 }
             },
             "video_tab": self.video_inference_tab.get_session_state(),
-            "extra_tab": self.extra_tab.get_session_state()
+            "extra_tab": self.extra_tab.get_session_state(),
+            "find_retraining_dataset_tab": self.find_retraining_dataset_tab.get_session_state()
         }
 
     def _restore_session_data(self, session_data: dict) -> list:
@@ -982,6 +988,12 @@ class MainWindow(QMainWindow):
         # Restore extra tab state
         extra_data = session_data.get("extra_tab", {})
         self.extra_tab.restore_session_state(extra_data)
+
+        # Restore find retraining dataset tab state
+        frd_data = session_data.get("find_retraining_dataset_tab", {})
+        if frd_data:
+            frd_warnings = self.find_retraining_dataset_tab.restore_session_state(frd_data)
+            warnings.extend(frd_warnings)
 
         return warnings
 
