@@ -79,7 +79,8 @@ def build():
     
     print(f"Adding hidden imports: {hidden_imports}")
 
-    app_name = "beaver"
+    from version_info import VERSION
+    app_name = f"beaver_{VERSION}"
 
     try:
         args = [

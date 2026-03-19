@@ -53,6 +53,7 @@ class ImageCanvas(QGraphicsView):
         self.show_annotations: bool = True
 
         # Drawing state
+        self.annotation_mode: str = "segmentation"
         self.drawing_mode: bool = False
         self.current_polygon: List[Tuple[float, float]] = []  # Pixel coordinates
         self.current_class_id: int = 0
@@ -196,10 +197,16 @@ class ImageCanvas(QGraphicsView):
         # Set pen and brush based on selection state
         if annotation.selected:
             pen = QPen(QColor(255, 255, 0), 3)  # Yellow for selected
-            brush = QBrush(QColor(255, 255, 0, 80))
+            if self.annotation_mode == "detection":
+                brush = QBrush(Qt.transparent)
+            else:
+                brush = QBrush(QColor(255, 255, 0, 80))
         else:
             pen = QPen(annotation.color.darker(150), 2)
-            brush = QBrush(annotation.color)
+            if self.annotation_mode == "detection":
+                brush = QBrush(Qt.transparent)
+            else:
+                brush = QBrush(annotation.color)
 
         # Add polygon to scene
         polygon_item = self.scene.addPolygon(polygon, pen, brush)
@@ -214,7 +221,10 @@ class ImageCanvas(QGraphicsView):
             pen = QPen(QColor(annotation.color.red(), annotation.color.green(), annotation.color.blue()), 1)
 
         for point in pixel_points:
-            vertex_item = self._create_crosshair_item(point.x(), point.y(), 12, pen)
+            if self.annotation_mode == "detection":
+                vertex_item = self._create_solid_dot_item(point.x(), point.y(), 1.2, pen.color())
+            else:
+                vertex_item = self._create_crosshair_item(point.x(), point.y(), 12, pen)
             vertex_list.append(vertex_item)
 
         self.vertex_items.append(vertex_list)
@@ -240,17 +250,41 @@ class ImageCanvas(QGraphicsView):
         self._clear_temp_graphics()
         self.setCursor(Qt.ArrowCursor)
 
+    def set_annotation_mode(self, mode: str) -> None:
+        """Set the annotation mode (segmentation or detection)"""
+        self.annotation_mode = mode
+        if self.drawing_mode:
+            self.stop_drawing()
+
     def finish_polygon(self) -> None:
         """Finish the current polygon and create an annotation"""
-        if len(self.current_polygon) < 3:
-            print("Polygon needs at least 3 points")
-            self.stop_drawing()
-            return
+        if self.annotation_mode == "segmentation":
+            if len(self.current_polygon) < 3:
+                print("Polygon needs at least 3 points")
+                self.stop_drawing()
+                return
+            points = self.current_polygon
+        else:
+            if len(self.current_polygon) != 2:
+                self.stop_drawing()
+                return
+            p1, p2 = self.current_polygon
+            if abs(p1[0] - p2[0]) < 5 or abs(p1[1] - p2[1]) < 5:
+                print("Bounding box too small")
+                self.stop_drawing()
+                return
+            # Convert 2 points to 4 points polygon
+            points = [
+                (p1[0], p1[1]),
+                (p2[0], p1[1]),
+                (p2[0], p2[1]),
+                (p1[0], p2[1])
+            ]
 
         # Create annotation from pixel coordinates
         normalized_points = [
             (x / self.image_width, y / self.image_height)
-            for x, y in self.current_polygon
+            for x, y in points
         ]
 
         annotation = Annotation(self.current_class_id, normalized_points, self.current_class_name)
@@ -275,22 +309,51 @@ class ImageCanvas(QGraphicsView):
         """Draw the polygon currently being created"""
         self._clear_temp_graphics()
 
-        # Draw polygon lines/fill only if we have at least 2 points
-        if len(self.current_polygon) >= 2:
-            points = [QPointF(x, y) for x, y in self.current_polygon]
-            polygon = QPolygonF(points)
-            self.temp_polygon_item = self.scene.addPolygon(
-                polygon,
-                QPen(QColor(0, 255, 0), 2),
-                QBrush(QColor(0, 255, 0, 80))
-            )
-            self.temp_polygon_item.setZValue(1)
+        if self.annotation_mode == "segmentation":
+            # Draw polygon lines/fill only if we have at least 2 points
+            if len(self.current_polygon) >= 2:
+                points = [QPointF(x, y) for x, y in self.current_polygon]
+                polygon = QPolygonF(points)
+                self.temp_polygon_item = self.scene.addPolygon(
+                    polygon,
+                    QPen(QColor(0, 255, 0), 2),
+                    QBrush(QColor(0, 255, 0, 80))
+                )
+                self.temp_polygon_item.setZValue(1)
 
-        # Draw crosshair vertices for ALL points (including the first one)
-        pen = QPen(Qt.green, 1)
-        for x, y in self.current_polygon:
-            vertex_item = self._create_crosshair_item(x, y, 12, pen)
-            self.temp_vertex_items.append(vertex_item)
+            # Draw crosshair vertices for ALL points (including the first one)
+            pen = QPen(Qt.green, 1)
+            for x, y in self.current_polygon:
+                vertex_item = self._create_crosshair_item(x, y, 12, pen)
+                self.temp_vertex_items.append(vertex_item)
+        else:
+            if len(self.current_polygon) == 2:
+                p1, p2 = self.current_polygon
+                points = [
+                    QPointF(p1[0], p1[1]),
+                    QPointF(p2[0], p1[1]),
+                    QPointF(p2[0], p2[1]),
+                    QPointF(p1[0], p2[1])
+                ]
+                polygon = QPolygonF(points)
+                self.temp_polygon_item = self.scene.addPolygon(
+                    polygon,
+                    QPen(QColor(0, 255, 0), 1), # Reduced from 2 to 1 (50% thinner)
+                    QBrush(Qt.transparent)
+                )
+                self.temp_polygon_item.setZValue(1)
+                
+                # Draw solid dot vertices for the 4 corners
+                for p in points:
+                    # 10% of radius 12 is 1.2
+                    vertex_item = self._create_solid_dot_item(p.x(), p.y(), 1.2, QColor(0, 255, 0))
+                    self.temp_vertex_items.append(vertex_item)
+
+    def _create_solid_dot_item(self, x: float, y: float, radius: float, color: QColor) -> QGraphicsEllipseItem:
+        """Create a solid dot graphics item"""
+        item = self.scene.addEllipse(x - radius, y - radius, radius * 2, radius * 2, QPen(Qt.transparent), QBrush(color))
+        item.setZValue(2)
+        return item
 
     def _create_crosshair_item(self, x: float, y: float, radius: int, pen: QPen) -> QGraphicsPathItem:
         """Create a crosshair graphics item (transparent circle + cross lines)"""
@@ -357,23 +420,6 @@ class ImageCanvas(QGraphicsView):
             return
 
         if event.button() == Qt.LeftButton:
-            # Check for Shift+Click to add points (start drawing if needed)
-            if event.modifiers() & Qt.ShiftModifier:
-                if not self.drawing_mode:
-                    self.start_drawing(self.current_class_id, self.current_class_name)
-                
-                self.current_polygon.append((x, y))
-                self._draw_temp_polygon()
-                self.shift_pressed = True
-                return
-
-            if self.drawing_mode:
-                # If drawing mode is on but Shift is NOT pressed, ignore or handle differently?
-                # The original requirement says "holding shift key... will add a point".
-                # Existing code enforced shift modifier for adding points.
-                # We'll stick to requiring Shift for adding points to be consistent.
-                return
-
             # Check if clicking on a vertex of selected annotation
             if self.selected_annotation:
                 vertex_index = self.selected_annotation.get_nearest_vertex(
@@ -406,27 +452,85 @@ class ImageCanvas(QGraphicsView):
                 self.selected_annotation = None
                 self.redraw_annotations()
 
+            if self.annotation_mode == "segmentation":
+                # Check for Shift+Click to add points (start drawing if needed)
+                if event.modifiers() & Qt.ShiftModifier:
+                    if not self.drawing_mode:
+                        self.start_drawing(self.current_class_id, self.current_class_name)
+                    
+                    self.current_polygon.append((x, y))
+                    self._draw_temp_polygon()
+                    self.shift_pressed = True
+                    return
+
+                if self.drawing_mode:
+                    return
+            else:
+                if event.modifiers() & Qt.ShiftModifier:
+                    if not self.drawing_mode and not selected and not self.dragging_vertex:
+                        self.start_drawing(self.current_class_id, self.current_class_name)
+                        self.current_polygon = [(x, y), (x, y)]
+                        self._draw_temp_polygon()
+                        self.shift_pressed = True
+                        return
+
+                if self.drawing_mode:
+                    return
+
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         """Handle mouse move events"""
+        scene_pos = self.mapToScene(event.pos())
+        x, y = scene_pos.x(), scene_pos.y()
+        # Clamp to image bounds
+        x = max(0, min(self.image_width, x))
+        y = max(0, min(self.image_height, y))
+
         if self.dragging_vertex and self.selected_annotation:
-            scene_pos = self.mapToScene(event.pos())
-            x, y = scene_pos.x(), scene_pos.y()
+            if self.annotation_mode == "detection" and len(self.selected_annotation.points) == 4:
+                idx = self.dragging_vertex_index
+                pixel_points = self.selected_annotation.get_pixel_points(self.image_width, self.image_height)
+                
+                p0 = [pixel_points[0].x(), pixel_points[0].y()]
+                p1 = [pixel_points[1].x(), pixel_points[1].y()]
+                p2 = [pixel_points[2].x(), pixel_points[2].y()]
+                p3 = [pixel_points[3].x(), pixel_points[3].y()]
 
-            # Clamp to image bounds
-            x = max(0, min(self.image_width, x))
-            y = max(0, min(self.image_height, y))
+                if idx == 0:
+                    p0 = [x, y]
+                    p1[1] = y
+                    p3[0] = x
+                elif idx == 1:
+                    p1 = [x, y]
+                    p0[1] = y
+                    p2[0] = x
+                elif idx == 2:
+                    p2 = [x, y]
+                    p1[0] = x
+                    p3[1] = y
+                elif idx == 3:
+                    p3 = [x, y]
+                    p0[0] = x
+                    p2[1] = y
 
-            # Update vertex
-            self.selected_annotation.update_vertex(
-                self.dragging_vertex_index,
-                (x, y),
-                self.image_width,
-                self.image_height
-            )
+                self.selected_annotation.update_vertex(0, tuple(p0), self.image_width, self.image_height)
+                self.selected_annotation.update_vertex(1, tuple(p1), self.image_width, self.image_height)
+                self.selected_annotation.update_vertex(2, tuple(p2), self.image_width, self.image_height)
+                self.selected_annotation.update_vertex(3, tuple(p3), self.image_width, self.image_height)
+            else:
+                # Update vertex
+                self.selected_annotation.update_vertex(
+                    self.dragging_vertex_index,
+                    (x, y),
+                    self.image_width,
+                    self.image_height
+                )
             self.redraw_annotations()
             # Don't emit annotation_modified here - wait until mouse release
+        elif self.drawing_mode and self.annotation_mode == "detection" and len(self.current_polygon) == 2:
+            self.current_polygon[1] = (x, y)
+            self._draw_temp_polygon()
 
         super().mouseMoveEvent(event)
 
@@ -447,6 +551,9 @@ class ImageCanvas(QGraphicsView):
 
             self.dragging_vertex = False
             self.dragging_vertex_index = -1
+            
+            if self.drawing_mode and self.annotation_mode == "detection":
+                self.finish_polygon()
 
         super().mouseReleaseEvent(event)
 
@@ -510,7 +617,7 @@ class ImageCanvas(QGraphicsView):
 
     def keyReleaseEvent(self, event):
         """Handle key release events"""
-        # When Shift is released during polygon drawing, finish the polygon
+        # When Shift is released during drawing, finish the polygon or bbox
         if event.key() == Qt.Key_Shift and self.drawing_mode and self.shift_pressed:
             self.finish_polygon()
         else:

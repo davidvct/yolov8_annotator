@@ -4,7 +4,7 @@ Widget for displaying and managing the list of annotations.
 from typing import List
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QListWidget,
                                 QListWidgetItem, QPushButton, QLabel, QComboBox,
-                                QGroupBox)
+                                QGroupBox, QRadioButton, QButtonGroup)
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QColor, QBrush, QPalette
 from models.annotation import Annotation
@@ -17,18 +17,40 @@ class AnnotationListWidget(QWidget):
     class_changed = Signal(int)  # Emitted when selected class changes
     delete_requested = Signal()  # Emitted when delete button clicked
     annotation_selected = Signal(int)  # Emitted when an annotation is clicked in the list (index)
+    mode_changed = Signal(str)  # Emitted when annotation mode changes (segmentation/detection)
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
         self.class_names: List[str] = ["Class 0", "Class 1", "Class 2"]  # Default classes
         self.current_class_id: int = 0
+        self.annotation_mode: str = "segmentation"
 
         self._setup_ui()
 
     def _setup_ui(self):
         """Setup the UI components"""
         layout = QVBoxLayout(self)
+
+        # Mode selection group
+        mode_group = QGroupBox("Annotation Mode")
+        mode_layout = QVBoxLayout()
+        
+        self.mode_button_group = QButtonGroup(self)
+        
+        self.radio_segmentation = QRadioButton("Instance Segmentation")
+        self.radio_segmentation.setChecked(True)
+        self.radio_segmentation.toggled.connect(self._on_mode_toggled)
+        self.mode_button_group.addButton(self.radio_segmentation)
+        mode_layout.addWidget(self.radio_segmentation)
+        
+        self.radio_detection = QRadioButton("Object Detection")
+        self.radio_detection.toggled.connect(self._on_mode_toggled)
+        self.mode_button_group.addButton(self.radio_detection)
+        mode_layout.addWidget(self.radio_detection)
+        
+        mode_group.setLayout(mode_layout)
+        layout.addWidget(mode_group)
 
         # Class selection group
         class_group = QGroupBox("Class Selection")
@@ -107,6 +129,10 @@ class AnnotationListWidget(QWidget):
     def get_current_class_name(self) -> str:
         """Get the currently selected class name"""
         return self.class_combo.currentText()
+        
+    def get_annotation_mode(self) -> str:
+        """Get the current annotation mode (segmentation or detection)"""
+        return self.annotation_mode
 
     def set_current_class_id(self, class_id: int) -> None:
         """Set the currently selected class ID without emitting signal"""
@@ -141,6 +167,17 @@ class AnnotationListWidget(QWidget):
         """Handle class selection change"""
         self.current_class_id = index
         self.class_changed.emit(index)
+
+    def _on_mode_toggled(self):
+        """Handle mode selection change"""
+        if self.radio_segmentation.isChecked():
+            mode = "segmentation"
+        else:
+            mode = "detection"
+            
+        if mode != self.annotation_mode:
+            self.annotation_mode = mode
+            self.mode_changed.emit(mode)
 
     def _on_delete_clicked(self):
         """Handle delete button click"""

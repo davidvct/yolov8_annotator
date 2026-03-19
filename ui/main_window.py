@@ -181,12 +181,24 @@ class MainWindow(QMainWindow):
         # Action buttons
         action_layout = QVBoxLayout()
 
-        # Instruction label
+        # Instruction labels
         instruction_label = QLabel("Hold Shift and left-click to create polygon")
         instruction_label.setWordWrap(True)
         instruction_label.setAlignment(Qt.AlignCenter)
         instruction_label.setStyleSheet("font-weight: bold; color: #555;")
         action_layout.addWidget(instruction_label)
+
+        zoom_label = QLabel("Hold Ctrl + Scroll to zoom")
+        zoom_label.setWordWrap(True)
+        zoom_label.setAlignment(Qt.AlignCenter)
+        zoom_label.setStyleSheet("font-weight: bold; color: #555;")
+        action_layout.addWidget(zoom_label)
+
+        pan_label = QLabel("Hold Middle Button to pan")
+        pan_label.setWordWrap(True)
+        pan_label.setAlignment(Qt.AlignCenter)
+        pan_label.setStyleSheet("font-weight: bold; color: #555;")
+        action_layout.addWidget(pan_label)
 
         # Undo button
         self.undo_btn = QPushButton("Undo (Ctrl+Z)")
@@ -453,6 +465,7 @@ class MainWindow(QMainWindow):
         self.annotation_widget.class_changed.connect(self.on_class_changed)
         self.annotation_widget.delete_requested.connect(self.delete_selected_annotation)
         self.annotation_widget.annotation_selected.connect(self.on_list_annotation_selected)
+        self.annotation_widget.mode_changed.connect(self.on_mode_changed)
 
         # Image list widget signals
         self.image_list_widget.image_selected.connect(self.on_image_list_selected)
@@ -594,7 +607,8 @@ class MainWindow(QMainWindow):
 
         # Load annotations
         label_path = self.file_handler.get_current_label_path()
-        yolo_annotations = load_annotations(label_path)
+        mode = self.annotation_widget.get_annotation_mode()
+        yolo_annotations = load_annotations(label_path, mode=mode)
 
         # Convert to Annotation objects
         self.current_annotations = []
@@ -637,6 +651,7 @@ class MainWindow(QMainWindow):
             return
 
         label_path = self.file_handler.get_current_label_path()
+        mode = self.annotation_widget.get_annotation_mode()
 
         # Convert Annotation objects to YOLOAnnotation
         yolo_annotations = []
@@ -645,7 +660,7 @@ class MainWindow(QMainWindow):
             yolo_annotations.append(yolo_ann)
 
         # Save to file (will delete file if no annotations)
-        save_annotations(label_path, yolo_annotations)
+        save_annotations(label_path, yolo_annotations, mode=mode)
 
         self.has_unsaved_changes = False
         self.undo_manager.mark_saved()
@@ -729,6 +744,13 @@ class MainWindow(QMainWindow):
             self.has_unsaved_changes = True
             self.push_undo_state()
             self.status_bar.showMessage(f"Changed annotation class to {class_name}", 2000)
+
+    def on_mode_changed(self, mode: str):
+        """Handle annotation mode change"""
+        self.canvas.set_annotation_mode(mode)
+        # Check unsaved changes before reloading
+        if self.file_handler.has_images():
+            self.load_current_image(check_unsaved=True)
 
     def push_undo_state(self):
         """Push the current annotation state to the undo manager"""

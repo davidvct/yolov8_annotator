@@ -8,36 +8,67 @@ from pathlib import Path
 
 
 class YOLOAnnotation:
-    """Represents a single YOLO annotation (polygon)"""
+    """Represents a single YOLO annotation (polygon or bounding box)"""
 
     def __init__(self, class_id: int, points: List[Tuple[float, float]]):
         """
         Args:
             class_id: Integer class ID
             points: List of (x, y) tuples in normalized coordinates (0-1)
+                    For segmentation, this is a list of polygon vertices.
+                    For detection, this should be a list of 4 points representing the corners of the box.
         """
         self.class_id = class_id
         self.points = points  # Normalized coordinates
 
-    def to_yolo_string(self) -> str:
+    def to_yolo_string(self, mode: str = "segmentation") -> str:
         """Convert annotation to YOLO format string"""
-        coords = ' '.join(f'{x:.6f} {y:.6f}' for x, y in self.points)
-        return f'{self.class_id} {coords}'
+        if mode == "detection":
+            # Find min and max x/y
+            x_coords = [p[0] for p in self.points]
+            y_coords = [p[1] for p in self.points]
+            min_x, max_x = min(x_coords), max(x_coords)
+            min_y, max_y = min(y_coords), max(y_coords)
+            
+            x_center = (min_x + max_x) / 2.0
+            y_center = (min_y + max_y) / 2.0
+            width = max_x - min_x
+            height = max_y - min_y
+            
+            return f'{self.class_id} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}'
+        else:
+            # Segmentation
+            coords = ' '.join(f'{x:.6f} {y:.6f}' for x, y in self.points)
+            return f'{self.class_id} {coords}'
 
     @staticmethod
-    def from_yolo_string(line: str) -> 'YOLOAnnotation':
+    def from_yolo_string(line: str, mode: str = "segmentation") -> 'YOLOAnnotation':
         """Parse YOLO format string to annotation"""
         parts = line.strip().split()
-        if len(parts) < 3:  # At least class_id + 1 point (x, y)
+        if len(parts) < 3:  # At least class_id + 1 point (x, y) / bounding box
             raise ValueError(f"Invalid YOLO format: {line}")
 
         class_id = int(parts[0])
         coords = [float(x) for x in parts[1:]]
 
-        if len(coords) % 2 != 0:
-            raise ValueError(f"Odd number of coordinates: {line}")
-
-        points = [(coords[i], coords[i + 1]) for i in range(0, len(coords), 2)]
+        if mode == "detection":
+            if len(coords) != 4:
+                raise ValueError(f"Expected 4 values for detection, got {len(coords)}: {line}")
+            x_center, y_center, width, height = coords
+            # Convert to 4 points polygon
+            half_w = width / 2.0
+            half_h = height / 2.0
+            points = [
+                (x_center - half_w, y_center - half_h), # Top-left
+                (x_center + half_w, y_center - half_h), # Top-right
+                (x_center + half_w, y_center + half_h), # Bottom-right
+                (x_center - half_w, y_center + half_h)  # Bottom-left
+            ]
+        else:
+            if len(coords) % 2 != 0:
+                raise ValueError(f"Odd number of coordinates for segmentation: {line}")
+            points = [(coords[i], coords[i + 1]) for i in range(0, len(coords), 2)]
+            
         return YOLOAnnotation(class_id, points)
 
     def to_pixel_coords(self, img_width: int, img_height: int) -> List[Tuple[float, float]]:
@@ -52,12 +83,13 @@ class YOLOAnnotation:
         return YOLOAnnotation(class_id, normalized_points)
 
 
-def load_annotations(annotation_path: str) -> List[YOLOAnnotation]:
+def load_annotations(annotation_path: str, mode: str = "segmentation") -> List[YOLOAnnotation]:
     """
     Load annotations from a YOLO format file.
 
     Args:
         annotation_path: Path to the annotation txt file
+        mode: "segmentation" or "detection"
 
     Returns:
         List of YOLOAnnotation objects
@@ -71,7 +103,7 @@ def load_annotations(annotation_path: str) -> List[YOLOAnnotation]:
             line = line.strip()
             if line:  # Skip empty lines
                 try:
-                    annotation = YOLOAnnotation.from_yolo_string(line)
+                    annotation = YOLOAnnotation.from_yolo_string(line, mode=mode)
                     annotations.append(annotation)
                 except ValueError as e:
                     print(f"Warning: Skipping invalid line in {annotation_path}: {e}")
@@ -79,13 +111,14 @@ def load_annotations(annotation_path: str) -> List[YOLOAnnotation]:
     return annotations
 
 
-def save_annotations(annotation_path: str, annotations: List[YOLOAnnotation]) -> None:
+def save_annotations(annotation_path: str, annotations: List[YOLOAnnotation], mode: str = "segmentation") -> None:
     """
     Save annotations to a YOLO format file.
 
     Args:
         annotation_path: Path to save the annotation txt file
         annotations: List of YOLOAnnotation objects
+        mode: "segmentation" or "detection"
     """
     if not annotations:
         # Delete the file if no annotations
@@ -98,7 +131,7 @@ def save_annotations(annotation_path: str, annotations: List[YOLOAnnotation]) ->
 
     with open(annotation_path, 'w') as f:
         for annotation in annotations:
-            f.write(annotation.to_yolo_string() + '\n')
+            f.write(annotation.to_yolo_string(mode=mode) + '\n')
 
 
 def get_annotation_path(image_path: str, labels_dir: str) -> str:
